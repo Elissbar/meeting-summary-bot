@@ -2,37 +2,50 @@ package handler
 
 import (
 	"fmt"
+	"time"
 
-	"github.com/Elissbar/meeting-summary-bot/internal/salutespeech"
+	"github.com/Elissbar/meeting-summary-bot/internal/service"
 	tg "gopkg.in/telebot.v3"
 )
 
-func OnVoice(b *tg.Bot) func(c tg.Context) error {
-	return func(c tg.Context) error {
-		voice := c.Message().Voice
-		fmt.Println("Voice:", voice)
+type TGBot struct {
+	Bot     *tg.Bot
+	Service *service.Service
+}
 
-		rc, err := b.File(&voice.File)
-		if err != nil {
-			return c.Send("Could not get file info.")
-		}
-		defer rc.Close()
-
-		salute := salutespeech.NewSaluteSpeechClient(
-			"https://ngw.devices.sberbank.ru:9443/api/v2/oauth",
-			"MDE5ZDExNTUtYmRhMC03YjY4LTgxZWMtN2MzYWEzYTczODNmOmRhM2EzYWZiLTg3MmItNGM1Zi1hMWM2LTE5NWIzMjA4YTMyMw==",
-			"SALUTE_SPEECH_PERS",
-		)
-		err = salute.Authorization()
-		if err != nil {
-			return c.Send("Authorization SaluteSpeech API error")
-		}
-
-		err = salute.Send(rc)
-		if err != nil {
-			return c.Send("Upload file into Salute error")
-		}
-
-		return c.Send("Your voice message link: ")
+func NewBot(token string, srvc *service.Service) (*TGBot, error) {
+	bot, err := tg.NewBot(
+		tg.Settings{
+			Token:  token,
+			Poller: &tg.LongPoller{Timeout: 10 * time.Second},
+		},
+	)
+	if err != nil {
+		return nil, err
 	}
+
+	return &TGBot{bot, srvc}, nil
+}
+
+func (b *TGBot) Handle() {
+	b.Bot.Handle(tg.OnVoice, b.OnVoice)
+	b.Bot.Start()
+}
+
+func (b *TGBot) OnVoice(c tg.Context) error {
+	voice := c.Message().Voice
+	fmt.Println("Voice:", voice)
+
+	rc, err := b.Bot.File(&voice.File)
+	if err != nil {
+		return c.Send(fmt.Sprintf("Could not get file info.\nError: %s", err.Error()))
+	}
+	defer rc.Close()
+
+	fileID, err := b.Service.UploadAndStartProcess(rc)
+	if err != nil {
+		return c.Send(fmt.Sprintf("Error: %s", err.Error()))
+	}
+
+	return c.Send("File in process: "+fileID)
 }

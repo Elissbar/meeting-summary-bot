@@ -11,7 +11,7 @@ import (
 )
 
 type SaluteSpeechClient struct {
-	URL         string
+	AuthURL     string
 	AuthToken   string
 	Scope       string
 	client      *resty.Client
@@ -19,13 +19,15 @@ type SaluteSpeechClient struct {
 	expiresAt   int64
 }
 
-func NewSaluteSpeechClient(url, authToken, scope string) *SaluteSpeechClient {
-	return &SaluteSpeechClient{
-		URL:       url,
+func NewSaluteSpeechClient(authURL, authToken, scope string) *SaluteSpeechClient {
+	salute := &SaluteSpeechClient{
+		AuthURL:   authURL,
 		AuthToken: authToken,
 		Scope:     scope,
 		client:    resty.New(),
 	}
+	salute.Authorization()
+	return salute
 }
 
 func (c *SaluteSpeechClient) Authorization() error {
@@ -37,7 +39,7 @@ func (c *SaluteSpeechClient) Authorization() error {
 		SetHeader("RqUID", uuid).
 		SetHeader("Authorization", fmt.Sprintf("Basic %s", c.AuthToken)).
 		SetFormData(map[string]string{"scope": c.Scope}).
-		Post(c.URL)
+		Post(c.AuthURL)
 	if err != nil {
 		return fmt.Errorf("authorization SaluteSpeech API error")
 	}
@@ -55,7 +57,7 @@ func (c *SaluteSpeechClient) Authorization() error {
 	return nil
 }
 
-func (c *SaluteSpeechClient) Send(file io.ReadCloser) error {
+func (c *SaluteSpeechClient) Send(file io.ReadCloser) (string, error) {
 	resp, err := c.client.R().
 		SetHeader("Content-Type", "audio/mpeg").
 		SetHeader("Accept", "application/json").
@@ -63,9 +65,27 @@ func (c *SaluteSpeechClient) Send(file io.ReadCloser) error {
 		SetBody(file).
 		Post("https://smartspeech.sber.ru/rest/v1/data:upload")
 	if err != nil {
-		return fmt.Errorf("error upload file")
+		return "", fmt.Errorf("error upload file into Salute: %w", err)
 	}
 
+	var res models.SaluteUploadResponse
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return "", fmt.Errorf("error unmarshall salute upload response: %w", err)
+	}
 	fmt.Println("Upload file result: ", resp.String())
+	return res.Result.RequestFileID, nil
+}
+
+func (c *SaluteSpeechClient) StartProcess(fileID string) error {
+	resp, err := c.client.R().
+		SetHeader("Content-Type", "application/json").
+		SetHeader("Accept", "application/json").
+		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
+		SetBody(fmt.Sprintf(task, "OPUS", true, fileID)).
+		Post("https://smartspeech.sber.ru/rest/v1/speech:async_recognize")
+	if err != nil {
+		return err
+	}
+	fmt.Println("Create task result: ", resp.String())
 	return nil
 }

@@ -1,24 +1,27 @@
 package main
 
 import (
-	"time"
+	"fmt"
 
+	"github.com/Elissbar/meeting-summary-bot/internal/config"
 	"github.com/Elissbar/meeting-summary-bot/internal/handler"
-	tg "gopkg.in/telebot.v3"
+	"github.com/Elissbar/meeting-summary-bot/internal/salutespeech"
+	"github.com/Elissbar/meeting-summary-bot/internal/service"
 )
 
 func main() {
-	b, err := tg.NewBot(
-		tg.Settings{
-			Token: "7925416453:AAFa-3-AhEel_8wQm-VNlvJD8bnPlzRtQOs",
-			Poller: &tg.LongPoller{Timeout: 10 * time.Second},
-		},
-	)
+	config, err := config.NewConfig()
 	if err != nil {
-		return
+		panic(fmt.Errorf("get config: %w", err))
 	}
 
-	b.Handle(tg.OnVoice, handler.OnVoice(b))
+	salute := salutespeech.NewSaluteSpeechClient(config.SaluteAuthURL, config.SaluteAuthToken, config.SaluteScope)
+	serv := service.NewService(salute)
 
-	b.Start()
+	tgBot, err := handler.NewBot(config.BotToken, serv)
+	if err != nil {
+		panic(fmt.Errorf("create bot error: %w", err))
+	}
+	tgBot.Handle()
+
 }
