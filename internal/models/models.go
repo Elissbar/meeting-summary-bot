@@ -78,3 +78,30 @@ type PersonIdentity struct {
 	AgeScore    float64 `json:"age_score"`
 	GenderScore float64 `json:"gender_score"`
 }
+
+// GigaChat
+type ChatResponse struct {
+	Choices []Choice `json:"choices"`
+	Created int64    `json:"created"`
+	Model   string   `json:"model"`
+	Object  string   `json:"object"`
+	Usage   Usage    `json:"usage"`
+}
+
+type Choice struct {
+	FinishReason string  `json:"finish_reason"`
+	Index        int     `json:"index"`
+	Message      Message `json:"message"`
+}
+
+type Message struct {
+	Content string `json:"content"`
+	Role    string `json:"role"`
+}
+
+type Usage struct {
+	CompletionTokens int `json:"completion_tokens"`
+	PromptTokens     int `json:"prompt_tokens"`
+	SystemTokens     int `json:"system_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}

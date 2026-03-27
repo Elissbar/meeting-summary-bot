@@ -133,11 +133,7 @@ func (c *SaluteSpeechClient) DownloadFile(responseFileID string) ([]models.Salut
 	if err != nil {
 		return []models.SaluteParsedFile{}, err
 	}
-	fmt.Println("Download file result: ", resp.String())
-	if err != nil {
-		fmt.Println("err:", err.Error())
-		return []models.SaluteParsedFile{}, err
-	}
+	fmt.Println("Download file result: ", fileData[0].Results[0].NormalizedText)
 	// fmt.Println("NormalizedText:", fileData[0].Results[0].NormalizedText)
 
 	return fileData, nil

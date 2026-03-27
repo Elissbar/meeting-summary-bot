@@ -8,12 +8,13 @@ import (
 )
 
 type Config struct {
-	BotToken          string `env:"BOT_TOKEN"`
-	SaluteAuthURL     string `env:"SALUTE_AUTH_URL"`
-	SaluteAuthToken   string `env:"SALUTE_AUTH_TOKEN"`
-	SaluteScope       string `env:"SALUTE_SCOPE"`
-	GigaChatAuthURL   string `env:"GIGA_AUTH_URL"`
+	BotToken        string `env:"BOT_TOKEN"`
+	AuthURL         string `env:"AUTH_URL"`
+	SaluteAuthToken string `env:"SALUTE_AUTH_TOKEN"`
+	SaluteScope     string `env:"SALUTE_SCOPE"`
+	// GigaChatAuthURL   string `env:"GIGA_AUTH_URL"`
 	GigaChatAuthToken string `env:"GIGA_AUTH_TOKEN"`
+	GigaChatScope     string `env:"GIGA_SCOPE"`
 }
 
 func NewConfig() (Config, error) {

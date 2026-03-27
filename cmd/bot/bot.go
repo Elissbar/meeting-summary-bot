@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/Elissbar/meeting-summary-bot/internal/config"
+	"github.com/Elissbar/meeting-summary-bot/internal/gigachat"
 	"github.com/Elissbar/meeting-summary-bot/internal/handler"
 	"github.com/Elissbar/meeting-summary-bot/internal/salutespeech"
 	"github.com/Elissbar/meeting-summary-bot/internal/service"
@@ -15,8 +16,10 @@ func main() {
 		panic(fmt.Errorf("get config: %w", err))
 	}
 
-	salute := salutespeech.NewSaluteSpeechClient(config.SaluteAuthURL, config.SaluteAuthToken, config.SaluteScope)
-	serv := service.NewService(salute)
+	salute := salutespeech.NewSaluteSpeechClient(config.AuthURL, config.SaluteAuthToken, config.SaluteScope)
+	giga := gigachat.NewGigaChatClient(config.AuthURL, config.GigaChatAuthToken, config.GigaChatScope)
+	
+	serv := service.NewService(salute, giga)
 
 	tgBot, err := handler.NewBot(config.BotToken, serv)
 	if err != nil {
