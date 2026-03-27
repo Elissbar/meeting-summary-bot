@@ -76,7 +76,9 @@ func (c *SaluteSpeechClient) Send(file io.ReadCloser) (string, error) {
 	return res.Result.RequestFileID, nil
 }
 
-func (c *SaluteSpeechClient) StartProcess(fileID string) error {
+func (c *SaluteSpeechClient) StartProcess(fileID string) (models.SaluteTaskResponse, error) {
+	var res models.SaluteTaskResponse
+
 	resp, err := c.client.R().
 		SetHeader("Content-Type", "application/json").
 		SetHeader("Accept", "application/json").
@@ -84,8 +86,59 @@ func (c *SaluteSpeechClient) StartProcess(fileID string) error {
 		SetBody(fmt.Sprintf(task, "OPUS", true, fileID)).
 		Post("https://smartspeech.sber.ru/rest/v1/speech:async_recognize")
 	if err != nil {
-		return err
+		return res, err
+	}
+
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return res, fmt.Errorf("error unmarshall salute create task response: %w", err)
 	}
 	fmt.Println("Create task result: ", resp.String())
-	return nil
+	return res, nil
+}
+
+
+func (c *SaluteSpeechClient) CheckTask(taskID string) (models.SaluteTaskResponse, error) {
+	var taskStatus models.SaluteTaskResponse
+
+	url := fmt.Sprintf("https://smartspeech.sber.ru/rest/v1/task:get?id=%s", taskID)
+	fmt.Println("Check file status URL: ", url)
+
+	resp, err := c.client.R().
+		SetHeader("Accept", "application/octet-stream").
+		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
+		SetResult(&taskStatus).
+		Get(url)
+	fmt.Println("Check task status: ", resp.String())
+	if err != nil {
+		fmt.Println("err:", err.Error())
+		return models.SaluteTaskResponse{}, err
+	}
+
+	return taskStatus, nil
+}
+
+func (c *SaluteSpeechClient) DownloadFile(responseFileID string) ([]models.SaluteParsedFile, error) {
+	var fileData []models.SaluteParsedFile
+
+	url := fmt.Sprintf("https://smartspeech.sber.ru/rest/v1/data:download?response_file_id=%s", responseFileID)
+	fmt.Println("Download file URL: ", url)
+
+	resp, err := c.client.R().
+		SetHeader("Accept", "application/octet-stream").
+		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
+		// SetResult(&fileData).
+		Get(url)
+
+	err = json.Unmarshal(resp.Body(), &fileData)
+	if err != nil {
+		return []models.SaluteParsedFile{}, err
+	}
+	fmt.Println("Download file result: ", resp.String())
+	if err != nil {
+		fmt.Println("err:", err.Error())
+		return []models.SaluteParsedFile{}, err
+	}
+	// fmt.Println("NormalizedText:", fileData[0].Results[0].NormalizedText)
+
+	return fileData, nil
 }
