@@ -56,7 +56,7 @@ func (c *GigaChatClient) Authorization() error {
 	return nil
 }
 
-func (c *GigaChatClient) Send(data string) (models.ChatResponse, error) {
+func (c *GigaChatClient) Send(data string) (string, error) {
 	resp, err := c.client.R().
 		SetHeader("Content-Type", "audio/mpeg").
 		SetHeader("Accept", "application/json").
@@ -64,13 +64,13 @@ func (c *GigaChatClient) Send(data string) (models.ChatResponse, error) {
 		SetBody(fmt.Sprintf(request, data)).
 		Post("https://gigachat.devices.sberbank.ru/api/v1/chat/completions")
 	if err != nil {
-		return models.ChatResponse{}, fmt.Errorf("error upload file into Salute: %w", err)
+		return "", fmt.Errorf("error upload file into Salute: %w", err)
 	}
 
 	var res models.ChatResponse
 	if err := json.Unmarshal(resp.Body(), &res); err != nil {
-		return models.ChatResponse{}, fmt.Errorf("error unmarshall salute upload response: %w", err)
+		return "", fmt.Errorf("error unmarshall salute upload response: %w", err)
 	}
 	fmt.Println("Giga reponse: ", resp.String())
-	return res, nil
+	return res.Choices[0].Message.Content, nil
 }

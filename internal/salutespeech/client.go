@@ -57,7 +57,7 @@ func (c *SaluteSpeechClient) Authorization() error {
 	return nil
 }
 
-func (c *SaluteSpeechClient) Send(file io.ReadCloser) (string, error) {
+func (c *SaluteSpeechClient) Send(file io.ReadCloser) (models.SaluteUploadResponse, error) {
 	resp, err := c.client.R().
 		SetHeader("Content-Type", "audio/mpeg").
 		SetHeader("Accept", "application/json").
@@ -65,15 +65,15 @@ func (c *SaluteSpeechClient) Send(file io.ReadCloser) (string, error) {
 		SetBody(file).
 		Post("https://smartspeech.sber.ru/rest/v1/data:upload")
 	if err != nil {
-		return "", fmt.Errorf("error upload file into Salute: %w", err)
+		return models.SaluteUploadResponse{}, fmt.Errorf("error upload file into Salute: %w", err)
 	}
 
 	var res models.SaluteUploadResponse
 	if err := json.Unmarshal(resp.Body(), &res); err != nil {
-		return "", fmt.Errorf("error unmarshall salute upload response: %w", err)
+		return models.SaluteUploadResponse{}, fmt.Errorf("error unmarshall salute upload response: %w", err)
 	}
 	fmt.Println("Upload file result: ", resp.String())
-	return res.Result.RequestFileID, nil
+	return res, nil
 }
 
 func (c *SaluteSpeechClient) StartProcess(fileID string) (models.SaluteTaskResponse, error) {
@@ -117,7 +117,7 @@ func (c *SaluteSpeechClient) CheckTask(taskID string) (models.SaluteTaskResponse
 	return taskStatus, nil
 }
 
-func (c *SaluteSpeechClient) DownloadFile(responseFileID string) ([]models.SaluteParsedFile, error) {
+func (c *SaluteSpeechClient) DownloadFile(responseFileID string) (string, error) {
 	var fileData []models.SaluteParsedFile
 
 	url := fmt.Sprintf("https://smartspeech.sber.ru/rest/v1/data:download?response_file_id=%s", responseFileID)
@@ -126,15 +126,13 @@ func (c *SaluteSpeechClient) DownloadFile(responseFileID string) ([]models.Salut
 	resp, err := c.client.R().
 		SetHeader("Accept", "application/octet-stream").
 		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
-		// SetResult(&fileData).
 		Get(url)
 
 	err = json.Unmarshal(resp.Body(), &fileData)
 	if err != nil {
-		return []models.SaluteParsedFile{}, err
+		return "", err
 	}
 	fmt.Println("Download file result: ", fileData[0].Results[0].NormalizedText)
-	// fmt.Println("NormalizedText:", fileData[0].Results[0].NormalizedText)
 
-	return fileData, nil
+	return fileData[0].Results[0].NormalizedText, nil
 }

@@ -11,6 +11,8 @@ import (
 type TGBot struct {
 	Bot     *tg.Bot
 	Service *service.Service
+	// Подумать над каналом для сохранения батчей задач. 
+	// Накапливать запросы от пользователей и при наполнении сохранять весь батч.
 }
 
 func NewBot(token string, srvc *service.Service) (*TGBot, error) {
@@ -29,11 +31,19 @@ func NewBot(token string, srvc *service.Service) (*TGBot, error) {
 
 func (b *TGBot) Handle() {
 	b.Bot.Handle(tg.OnVoice, b.OnVoice)
+}
+
+func (b *TGBot) Start() {
 	b.Bot.Start()
+}
+
+func (b *TGBot) Stop() {
+	b.Bot.Stop()
 }
 
 func (b *TGBot) OnVoice(c tg.Context) error {
 	voice := c.Message().Voice
+	userID := c.Sender().ID
 	fmt.Println("Voice:", voice)
 
 	rc, err := b.Bot.File(&voice.File)
@@ -42,10 +52,10 @@ func (b *TGBot) OnVoice(c tg.Context) error {
 	}
 	defer rc.Close()
 
-	fileID, err := b.Service.UploadAndStartProcess(rc)
+	taskID, err := b.Service.UploadAndStartProcess(rc, userID)
 	if err != nil {
 		return c.Send(fmt.Sprintf("Error: %s", err.Error()))
 	}
 
-	return c.Send("File in process: "+fileID)
+	return c.Send(fmt.Sprintf("File in process. ID: %d", taskID))
 }

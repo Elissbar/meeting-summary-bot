@@ -1,19 +1,22 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 
+	"github.com/Elissbar/meeting-summary-bot/internal/models"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
 
 	_ "github.com/golang-migrate/migrate/v4/source/file"
+
+	sq "github.com/Masterminds/squirrel"
 )
 
-// DBStorage тип для работы с БД.
 type DBStorage struct {
 	DB *sql.DB
-	// Logger         *zap.SugaredLogger
+	builder sq.StatementBuilderType
 }
 
 func NewDatabaseStorage(connectionData string) (*DBStorage, error) {
@@ -26,7 +29,8 @@ func NewDatabaseStorage(connectionData string) (*DBStorage, error) {
 		return nil, fmt.Errorf("failed to ping database: %w", err)
 	}
 
-	storage := &DBStorage{DB: db}
+	psql := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).RunWith(db)
+	storage := &DBStorage{db, psql}
 
 	// ВТОРОЕ: применяем миграции
 	if err := storage.Migrate(); err != nil {
@@ -59,6 +63,52 @@ func (db *DBStorage) Migrate() error {
 	return nil
 }
 
-func (db *DBStorage) Save() error {
+func (db *DBStorage) GetAllNewTasks(ctx context.Context) ([]models.Transcriptions, error) {
+	var transcriptions []models.Transcriptions
+
+	err := db.builder.
+		Select("user_id", "request_file_id", "status").
+		From("transcriptions").
+		Where(sq.Eq{"status": "NEW"}).
+		QueryRowContext(ctx).Scan(&transcriptions)
+	if err != nil {
+		return nil, err
+	}
+	return transcriptions, nil
+}
+
+func (db *DBStorage) SaveTask(ctx context.Context, userID int64, fileID, taskID string) (int64, error) {
+	insertQuery := db.builder.
+		Insert("transcriptions").
+		Columns("user_id", "request_file_id", "task_id").
+		Values(userID, fileID, taskID).
+		Suffix("RETURNING id")
+	
+	var id int64
+	err := insertQuery.QueryRowContext(ctx).Scan(&id)
+	if err != nil {
+		return 0, err
+	}
+	return id, nil
+}
+
+func (db *DBStorage) UpdateTasks(
+	ctx context.Context, 
+	userID int64, 
+	fileID string, 
+	transcription, summary, status string,
+) error {
+	_, err := db.builder.
+		Update("transcriptions").
+		Set("transcript", transcription).
+		Set("summary", summary).
+		Set("status", status).
+		Where(sq.Eq{"user_id": userID}).
+		Where(sq.Eq{"request_file_id": fileID}).
+		ExecContext(ctx)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
