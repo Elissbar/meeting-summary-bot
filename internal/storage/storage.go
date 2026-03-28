@@ -63,34 +63,50 @@ func (db *DBStorage) Migrate() error {
 	return nil
 }
 
-func (db *DBStorage) GetAllNewTasks(ctx context.Context) ([]models.Transcriptions, error) {
-	var transcriptions []models.Transcriptions
-
-	err := db.builder.
-		Select("user_id", "request_file_id", "status").
-		From("transcriptions").
-		Where(sq.Eq{"status": "NEW"}).
-		QueryRowContext(ctx).Scan(&transcriptions)
-	if err != nil {
-		return nil, err
-	}
-	return transcriptions, nil
-}
-
-func (db *DBStorage) SaveTask(ctx context.Context, userID int64, fileID, taskID string) (int64, error) {
+func (db *DBStorage) CreateTask(ctx context.Context, userID int64, fileID string) (int64, error) {
 	insertQuery := db.builder.
-		Insert("transcriptions").
-		Columns("user_id", "request_file_id", "task_id").
-		Values(userID, fileID, taskID).
+		Insert("meetings").
+		Columns("user_id", "file_id").
+		Values(userID, fileID).
 		Suffix("RETURNING id")
 	
-	var id int64
-	err := insertQuery.QueryRowContext(ctx).Scan(&id)
+	var lastInsertID int64
+	err := insertQuery.QueryRowContext(ctx).Scan(&lastInsertID)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("scan row id error: %w", err)
 	}
-	return id, nil
+
+	return lastInsertID, nil
 }
+
+func (db *DBStorage) GetAllNewTasks(ctx context.Context) ([]models.Meeting, error) {
+	var meetings []models.Meeting
+
+	err := db.builder.
+		Select("id", "user_id", "file_id", "status").
+		From("meetings").
+		Where(sq.Eq{"status": "NEW"}).
+		QueryRowContext(ctx).Scan(&meetings)
+	if err != nil {
+		return meetings, fmt.Errorf("get all NEW tasks error: %w", err)
+	}
+	return meetings, nil
+}
+
+// func (db *DBStorage) SaveTask(ctx context.Context, userID int64, fileID, taskID string) (int64, error) {
+// 	insertQuery := db.builder.
+// 		Insert("transcriptions").
+// 		Columns("user_id", "request_file_id", "task_id").
+// 		Values(userID, fileID, taskID).
+// 		Suffix("RETURNING id")
+	
+// 	var id int64
+// 	err := insertQuery.QueryRowContext(ctx).Scan(&id)
+// 	if err != nil {
+// 		return 0, err
+// 	}
+// 	return id, nil
+// }
 
 func (db *DBStorage) UpdateTasks(
 	ctx context.Context, 

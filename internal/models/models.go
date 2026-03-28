@@ -112,14 +112,13 @@ type Users struct {
 	CreatedAt string `json:"created_at"`
 }
 
-type Transcriptions struct {
-	ID            int64  `json:"-"`
-	UserID        int64  `json:"user_id"`
-	RequestFileID string `json:"request_file_id"`
-	TaskID        string `json:"task_id"`
-	Transcript    string `json:"transcript,omitempty"`
-	Summary       string `json:"summary,omitempty"`
-	Status        string `json:"status"`
-	CreatedAt     string `json:"created_at"`
-	UpdatedAt     string `json:"updated_at"`
+type Meeting struct {
+	ID         int64  `json:"id"`
+	UserID     int64  `json:"user_id"`
+	FileID     string `json:"file_id"`
+	Transcript string `json:"transcript,omitempty"`
+	Summary    string `json:"summary,omitempty"`
+	Status     string `json:"status"`
+	CreatedAt  string `json:"created_at"`
+	UpdatedAt  string `json:"updated_at"`
 }

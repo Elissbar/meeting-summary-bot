@@ -3,12 +3,14 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
+	handler "github.com/Elissbar/meeting-summary-bot/internal/bot"
 	"github.com/Elissbar/meeting-summary-bot/internal/config"
 	"github.com/Elissbar/meeting-summary-bot/internal/gigachat"
-	"github.com/Elissbar/meeting-summary-bot/internal/handler"
 	"github.com/Elissbar/meeting-summary-bot/internal/salutespeech"
 	"github.com/Elissbar/meeting-summary-bot/internal/service"
 	"github.com/Elissbar/meeting-summary-bot/internal/storage"
@@ -17,6 +19,7 @@ import (
 
 func main() {
 	shutdownCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, syscall.SIGINT, syscall.SIGQUIT)
+	grp, gCtx := errgroup.WithContext(shutdownCtx)
 	defer stop()
 
 	config, err := config.NewConfig()
@@ -32,16 +35,21 @@ func main() {
 		panic(fmt.Errorf("create storage error: %w", err))
 	}
 
-	serv := service.NewService(salute, giga, storage, config.WaitPlaceInChan, config.StopProcess)
+	tgBot, err := handler.NewBot(config.BotToken)
+	if err != nil {
+		panic(fmt.Errorf("create Bot error: %w", err))
+	}
 
-	tgBot, err := handler.NewBot(config.BotToken, serv)
+	var wg *sync.WaitGroup
+	serv := service.NewService(gCtx, salute, giga, storage, tgBot, wg, config.WaitPlaceInChan, config.StopProcess)
+
+	handler, err := handler.NewHandler(serv)
 	if err != nil {
 		panic(fmt.Errorf("create bot error: %w", err))
 	}
 
-	grp, gCtx := errgroup.WithContext(shutdownCtx)
 	grp.Go(func() error {
-		tgBot.Handle() // Как обработать ошибку
+		handler.Handle() // Как обработать ошибку
 		tgBot.Start()
 		return nil
 	})
@@ -49,6 +57,14 @@ func main() {
 		<-gCtx.Done()
 		tgBot.Stop()
 		close(serv.Tasks)
+		close(serv.Results)
 		return nil
 	})
+
+	if err := grp.Wait(); err != nil {
+		fmt.Printf("Application error: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Println("Bot stopped")
 }
