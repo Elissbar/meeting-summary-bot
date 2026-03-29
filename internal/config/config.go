@@ -16,6 +16,7 @@ type Config struct {
 	GigaChatAuthToken string `env:"GIGA_AUTH_TOKEN"`
 	GigaChatScope     string `env:"GIGA_SCOPE"`
 	DBConnectionURI   string `env:"DB_URI"`
+	NumWorkers        int    `env:"NUM_WORKERS" envDefault:"5"`
 
 	// Timeouts
 	WaitPlaceInChan time.Duration `env:"WAIT_PLACE_IN_TASK_CHAN" envDefault:"500ms"`

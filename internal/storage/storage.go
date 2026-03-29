@@ -3,19 +3,23 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 
+	myerrors "github.com/Elissbar/meeting-summary-bot/internal/errors"
 	"github.com/Elissbar/meeting-summary-bot/internal/models"
 	"github.com/golang-migrate/migrate/v4"
 	"github.com/golang-migrate/migrate/v4/database/postgres"
+	"github.com/jackc/pgerrcode"
 
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 
 	sq "github.com/Masterminds/squirrel"
+	"github.com/lib/pq"
 )
 
 type DBStorage struct {
-	DB *sql.DB
+	DB      *sql.DB
 	builder sq.StatementBuilderType
 }
 
@@ -63,13 +67,45 @@ func (db *DBStorage) Migrate() error {
 	return nil
 }
 
+func (db *DBStorage) CreateUser(ctx context.Context, userID int64) error {
+	insertQuery := db.builder.
+		Insert("users").
+		Columns("user_id").
+		Values(userID)
+
+	_, err := insertQuery.QueryContext(ctx)
+	if err != nil {
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code == pgerrcode.UniqueViolation {
+			return fmt.Errorf("user with ID - %d already exists.", userID)
+		}
+		return fmt.Errorf("create user error: %v", err)
+	}
+	return nil
+}
+
+func (db *DBStorage) CheckUser(ctx context.Context, userID int64) (bool, error) {
+	var cnt int64
+
+	err := db.builder.
+		Select("COUNT(*)").
+		From("users").
+		Where(sq.Eq{"user_id": userID}).
+		QueryRowContext(ctx).Scan(&cnt)
+	if err != nil {
+		return false, fmt.Errorf("get users count error: %w", err)
+	}
+
+	return cnt == 1, nil
+}
+
 func (db *DBStorage) CreateTask(ctx context.Context, userID int64, fileID string) (int64, error) {
 	insertQuery := db.builder.
 		Insert("meetings").
 		Columns("user_id", "file_id").
 		Values(userID, fileID).
 		Suffix("RETURNING id")
-	
+
 	var lastInsertID int64
 	err := insertQuery.QueryRowContext(ctx).Scan(&lastInsertID)
 	if err != nil {
@@ -82,45 +118,57 @@ func (db *DBStorage) CreateTask(ctx context.Context, userID int64, fileID string
 func (db *DBStorage) GetAllNewTasks(ctx context.Context) ([]models.Meeting, error) {
 	var meetings []models.Meeting
 
-	err := db.builder.
+	rows, err := db.builder.
 		Select("id", "user_id", "file_id", "status").
 		From("meetings").
 		Where(sq.Eq{"status": "NEW"}).
-		QueryRowContext(ctx).Scan(&meetings)
+		QueryContext(ctx)
 	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return meetings, myerrors.ErrNoRows
+		}
 		return meetings, fmt.Errorf("get all NEW tasks error: %w", err)
 	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var meeting models.Meeting
+
+		err := rows.Scan(
+			&meeting.ID,
+			&meeting.UserID,
+			&meeting.FileID,
+			&meeting.Status,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("scan task row error: %w", err)
+		}
+
+		meetings = append(meetings, meeting)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating rows: %v", err)
+	}
+
 	return meetings, nil
 }
 
-// func (db *DBStorage) SaveTask(ctx context.Context, userID int64, fileID, taskID string) (int64, error) {
-// 	insertQuery := db.builder.
-// 		Insert("transcriptions").
-// 		Columns("user_id", "request_file_id", "task_id").
-// 		Values(userID, fileID, taskID).
-// 		Suffix("RETURNING id")
-	
-// 	var id int64
-// 	err := insertQuery.QueryRowContext(ctx).Scan(&id)
-// 	if err != nil {
-// 		return 0, err
-// 	}
-// 	return id, nil
-// }
-
 func (db *DBStorage) UpdateTasks(
-	ctx context.Context, 
-	userID int64, 
-	fileID string, 
-	transcription, summary, status string,
+	ctx context.Context,
+	task models.Meeting,
+	status string,
+	// userID int64,
+	// fileID string,
+	// transcription, summary, status string,
 ) error {
 	_, err := db.builder.
-		Update("transcriptions").
-		Set("transcript", transcription).
-		Set("summary", summary).
+		Update("meetings").
+		Set("transcript", task.Transcript).
+		Set("summary", task.Summary).
 		Set("status", status).
-		Where(sq.Eq{"user_id": userID}).
-		Where(sq.Eq{"request_file_id": fileID}).
+		Where(sq.Eq{"user_id": task.UserID}).
+		Where(sq.Eq{"file_id": task.FileID}).
 		ExecContext(ctx)
 	if err != nil {
 		return err

@@ -42,7 +42,7 @@ func (c *GigaChatClient) Authorization() error {
 	if err != nil {
 		return fmt.Errorf("authorization SaluteSpeech API error")
 	}
-	fmt.Println("Auth GigaChat result: ", resp.String())
+	// fmt.Println("Giga Status code: ", resp.StatusCode(), "Auth result: ", resp.String())
 
 	var authResp models.SaluteAuthResponse
 	err = json.Unmarshal(resp.Body(), &authResp)
@@ -57,6 +57,8 @@ func (c *GigaChatClient) Authorization() error {
 }
 
 func (c *GigaChatClient) Send(data string) (string, error) {
+	// fmt.Print("Access token for GigaChat:", fmt.Sprintf("Bearer %s", c.accessToken))
+
 	resp, err := c.client.R().
 		SetHeader("Content-Type", "audio/mpeg").
 		SetHeader("Accept", "application/json").

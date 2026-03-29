@@ -1,4 +1,4 @@
-package bot
+package handler
 
 import (
 	"fmt"
@@ -9,14 +9,27 @@ import (
 
 type Handler struct {
 	Service *service.Service
+	Bot     *tg.Bot
 }
 
-func NewHandler(srvc *service.Service) (*Handler, error) {
-	return &Handler{srvc}, nil
+func NewHandler(srvc *service.Service, tgBot *tg.Bot) (*Handler, error) {
+	return &Handler{srvc, tgBot}, nil
 }
 
 func (h *Handler) Handle() {
-	h.Service.Bot.Handle(tg.OnVoice, h.OnVoice)
+	h.Bot.Use(h.CheckUser)
+	h.Bot.Handle(tg.OnVoice, h.OnVoice)
+	h.Bot.Handle("/start", h.CreateUser)
+}
+
+func (h *Handler) CreateUser(c tg.Context) error {
+	userID := c.Sender().ID
+	err := h.Service.CreateUser(userID)
+	if err != nil {
+		return c.Send(err.Error())
+	}
+
+	return c.Send(fmt.Sprintf("User ID: %d", userID))
 }
 
 func (b *Handler) OnVoice(c tg.Context) error {

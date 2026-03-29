@@ -8,9 +8,10 @@ import (
 	"sync"
 	"syscall"
 
-	handler "github.com/Elissbar/meeting-summary-bot/internal/bot"
+	"github.com/Elissbar/meeting-summary-bot/internal/bot"
 	"github.com/Elissbar/meeting-summary-bot/internal/config"
 	"github.com/Elissbar/meeting-summary-bot/internal/gigachat"
+	"github.com/Elissbar/meeting-summary-bot/internal/handler"
 	"github.com/Elissbar/meeting-summary-bot/internal/salutespeech"
 	"github.com/Elissbar/meeting-summary-bot/internal/service"
 	"github.com/Elissbar/meeting-summary-bot/internal/storage"
@@ -35,29 +36,30 @@ func main() {
 		panic(fmt.Errorf("create storage error: %w", err))
 	}
 
-	tgBot, err := handler.NewBot(config.BotToken)
+	tgBot, err := bot.NewBot(config.BotToken)
 	if err != nil {
 		panic(fmt.Errorf("create Bot error: %w", err))
 	}
 
-	var wg *sync.WaitGroup
-	serv := service.NewService(gCtx, salute, giga, storage, tgBot, wg, config.WaitPlaceInChan, config.StopProcess)
+	var wg sync.WaitGroup
+	serv := service.NewService(gCtx, salute, giga, storage, config, &wg, tgBot)
 
-	handler, err := handler.NewHandler(serv)
+	handler, err := handler.NewHandler(serv, tgBot.Bot)
 	if err != nil {
 		panic(fmt.Errorf("create bot error: %w", err))
 	}
 
 	grp.Go(func() error {
 		handler.Handle() // Как обработать ошибку
-		tgBot.Start()
+		tgBot.Bot.Start()
 		return nil
 	})
 	grp.Go(func() error {
 		<-gCtx.Done()
-		tgBot.Stop()
+		tgBot.Bot.Stop()
 		close(serv.Tasks)
 		close(serv.Results)
+		close(serv.GigaTasks)
 		return nil
 	})
 

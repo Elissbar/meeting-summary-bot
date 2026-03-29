@@ -2,15 +2,19 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
+	"github.com/Elissbar/meeting-summary-bot/internal/bot"
+	"github.com/Elissbar/meeting-summary-bot/internal/config"
+	myerrors "github.com/Elissbar/meeting-summary-bot/internal/errors"
 	"github.com/Elissbar/meeting-summary-bot/internal/gigachat"
 	"github.com/Elissbar/meeting-summary-bot/internal/models"
 	"github.com/Elissbar/meeting-summary-bot/internal/salutespeech"
 	"github.com/Elissbar/meeting-summary-bot/internal/storage"
-	tg "gopkg.in/telebot.v3"
 )
 
 type Service struct {
@@ -18,14 +22,14 @@ type Service struct {
 	salute  *salutespeech.SaluteSpeechClient
 	giga    *gigachat.GigaChatClient
 	storage *storage.DBStorage
+	config  *config.Config
 	wg      *sync.WaitGroup
-	Bot     *tg.Bot
+	Bot     *bot.Bot
 	// Каналы придется закрывать в Graceful Shutdown
-	Tasks   chan models.Meeting
-	Results chan models.Meeting
-	// Timeouts
-	waitPlaceInChan  time.Duration
-	stopProcessTasks time.Duration
+	numWorkers int
+	Tasks      chan models.Meeting
+	Results    chan models.Meeting
+	GigaTasks  chan models.Meeting
 }
 
 func NewService(
@@ -33,22 +37,42 @@ func NewService(
 	salute *salutespeech.SaluteSpeechClient,
 	giga *gigachat.GigaChatClient,
 	storage *storage.DBStorage,
-	bot *tg.Bot,
+	config *config.Config,
 	wg *sync.WaitGroup,
-	waitPlace, stopProcess time.Duration,
+	bot *bot.Bot,
 ) *Service {
 	s := &Service{
-		ctx, salute, giga, 
-		storage, wg, bot, 
-		make(chan models.Meeting, 100), make(chan models.Meeting, 100), 
-		waitPlace, stopProcess,
+		ctx: ctx, salute: salute, giga: giga,
+		storage: storage, config: config, wg: wg, Bot: bot,
+		Tasks: make(chan models.Meeting, 100), Results: make(chan models.Meeting, 100),
 	}
+	s.numWorkers = 5
+	s.GigaTasks = make(chan models.Meeting, s.numWorkers)
 	go func() {
 		if err := s.ProcessTasks(); err != nil {
 			fmt.Printf("Order processor stopped with error: %v\n", err)
 		}
 	}()
+	go func() {
+		if err := bot.SendProcessedTasks(s.Results); err != nil {
+			fmt.Printf("Order processor stopped with error: %v\n", err)
+		}
+	}()
 	return s
+}
+
+func (s *Service) CreateUser(userID int64) error {
+	ctx, cancel := context.WithTimeout(s.ctx, time.Second*10)
+	defer cancel()
+
+	return s.storage.CreateUser(ctx, userID)
+}
+
+func (s *Service) CheckUser(userID int64) (bool, error) {
+	ctx, cancel := context.WithTimeout(s.ctx, time.Second*10)
+	defer cancel()
+
+	return s.storage.CheckUser(ctx, userID)
 }
 
 func (s *Service) CreateTask(fileID string, userID int64) (int64, error) {
@@ -64,13 +88,15 @@ func (s *Service) CreateTask(fileID string, userID int64) (int64, error) {
 }
 
 func (s *Service) ProcessTasks() error {
-	numWorkers := 5
-	s.wg.Add(numWorkers)
-	for i := range numWorkers {
-		go s.worker(i)
+	go s.gigaProcessTasks()
+
+	s.wg.Add(s.numWorkers)
+	for i := range s.numWorkers {
+		ind := i
+		go s.worker(ind)
 	}
 
-	ticker := time.NewTicker(time.Second * 15)
+	ticker := time.NewTicker(time.Second * 10)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -82,83 +108,129 @@ func (s *Service) ProcessTasks() error {
 		default:
 		}
 
-		ctx, cancel := context.WithTimeout(s.ctx, time.Second*5)
-		defer cancel()
-
-		rows, err := s.storage.GetAllNewTasks(ctx)
-		if err != nil {
+		if err := s.uploadTasksToChannel(); err != nil {
 			return err
-		}
-
-		for _, row := range rows {
-			select {
-			case s.Tasks <- row:
-			case <-time.After(s.waitPlaceInChan):
-				select {
-				case s.Tasks <- row:
-				case <-time.After(s.stopProcessTasks):
-					fmt.Printf("Tasks channel full, skipping task %d\n", row.ID)
-				}
-			}
 		}
 	}
 
 	return nil
 }
 
-func (s *Service) worker(workerID int) error {
+func (s *Service) worker(workerID int) (err error) {
+	fmt.Printf("Run worker with ID: %d.\n", workerID)
+	defer s.wg.Done()
+
+	for task := range s.Tasks {
+		// Если в ходе работы воркера произошла ошибка, отмечаем такие задачи в БД
+		defer func() {
+			if err != nil {
+				ctx, cancel := context.WithTimeout(s.ctx, time.Second*3)
+				defer cancel()
+				s.storage.UpdateTasks(ctx, task, "FAILED")
+
+				task.Status = "FAILED"
+				s.Results <- task
+				fmt.Println("Задача завершилась ошибкой: ", err, "Отправили задачу в канал результатов: ", task)
+			}
+		}()
+
+		curStatus := task.Status
+		if err := s.markTaskInProgress(task); err != nil {
+			return err
+		}
+
+		fmt.Println("Воркер: ", workerID, "Берем данные из канала: ", task, "Статус задач:", task.Status)
+		fileData, err := s.Bot.GetFile(task.FileID, s.config.BotToken)
+		if err != nil {
+			return err
+		}
+
+		uploadedFile, err := s.salute.Send(fileData)
+		if err != nil {
+			return err
+		}
+
+		createdTask, err := s.salute.StartProcess(uploadedFile.Result.RequestFileID)
+		if err != nil {
+			return err
+		}
+
+		var taskResponse models.SaluteTaskResponse
+		for !slices.Contains([]string{"CANCELED", "DONE", "ERROR"}, curStatus) {
+			time.Sleep(time.Millisecond * 500)
+			taskResponse, err = s.salute.CheckTask(createdTask.Result.ID)
+			if err != nil {
+				return err
+			}
+			curStatus = taskResponse.Result.Status
+		}
+
+		var transcription string
+		if curStatus == "DONE" {
+			transcription, err = s.salute.DownloadFile(taskResponse.Result.ResponseFileID)
+			if err != nil {
+				return err
+			}
+		}
+
+		task.Status = curStatus
+		task.Transcript = transcription
+		s.GigaTasks <- task // Будем блокировать воркеры, если канал занят, но иначе не придумал, ведь Гига обрабатывает только в 1 поток.
+	}
 	return nil
 }
 
-// 	for task := range s.Tasks {
+func (s *Service) markTaskInProgress(task models.Meeting) error {
+	ctx, cancel := context.WithTimeout(s.ctx, time.Second*3)
+	defer cancel()
+	return s.storage.UpdateTasks(ctx, task, "IN_PROGRESS")
+}
 
-// 		fileID, err := s.salute.Send(file)
-// 		if err != nil {
-// 			return -1, err
-// 		}
+func (s *Service) gigaProcessTasks() error {
+	for task := range s.GigaTasks {
+		chatResponse, err := s.giga.Send(task.Transcript)
+		if err != nil {
+			return err
+		}
+		task.Summary = chatResponse
 
-// 		createdTask, err := s.salute.StartProcess(fileID.Result.RequestFileID)
-// 		if err != nil {
-// 			return -1, err
-// 		}
+		ctx, cancel := context.WithTimeout(s.ctx, time.Second*3)
+		defer cancel()
+		err = s.storage.UpdateTasks(ctx, task, task.Status)
+		if err != nil {
+			return err
+		}
 
-// 		fileID, err := s.salute.Send(file)
-// 		if err != nil {
-// 			return -1, err
-// 		}
+		s.Results <- task
+		fmt.Println("Отправили задачу в канал результатов:", task)
+	}
+	return nil
+}
 
-// 		createdTask, err := s.salute.StartProcess(fileID.Result.RequestFileID)
-// 		if err != nil {
-// 			return -1, err
-// 		}
-// 		taskStatus := task.Status
-// 		// var task models.SaluteTaskResponse
+func (s *Service) uploadTasksToChannel() error {
+	ctx, cancel := context.WithTimeout(s.ctx, time.Second*5)
+	defer cancel()
 
-// 		for !slices.Contains([]string{"CANCELED", "DONE", "ERROR"}, taskStatus) {
-// 			time.Sleep(time.Millisecond * 500)
-// 			taskResponse, err := s.salute.CheckTask(task.taskID)
-// 			if err != nil {
-// 				return err
-// 			}
+	rows, err := s.storage.GetAllNewTasks(ctx)
+	if err != nil && !errors.Is(err, myerrors.ErrNoRows) {
+		fmt.Println("Ошибка при получении новых задач: ", err)
+		return err
+	}
+	fmt.Println("Получили задачи из БД в статусе NEW. Кол-во:", len(rows))
+	// fmt.Println("Одна из задач: ", rows[0])
 
-// 			taskStatus = taskResponse.Result.Status
-// 		}
-
-// 		var transcription, chatResponse string
-// 		if taskStatus == "DONE" {
-// 			transcription, err := s.salute.DownloadFile(task.requestFileID)
-// 			if err != nil {
-// 				return err
-// 			}
-
-// 			chatResponse, err = s.giga.Send(transcription)
-// 			if err != nil {
-// 				return err
-// 			}
-// 		}
-
-// 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
-// 		defer cancel()
-// 		s.storage.UpdateTasks(ctx, task.userID, task.requestFileID, transcription, chatResponse, taskStatus)
-// 	}
-// 	return nil
+	for _, row := range rows {
+		select {
+		case s.Tasks <- row:
+			fmt.Println("Отправили задачу в канал:", row)
+		case <-time.After(s.config.WaitPlaceInChan):
+			select {
+			case s.Tasks <- row:
+				fmt.Println("Отправили задачу в канал:", row)
+			case <-time.After(s.config.StopProcess):
+				fmt.Printf("Tasks channel full, skipping task %d\n", row.ID)
+			}
+		}
+	}
+	return nil
+}

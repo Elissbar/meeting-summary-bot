@@ -43,7 +43,7 @@ func (c *SaluteSpeechClient) Authorization() error {
 	if err != nil {
 		return fmt.Errorf("authorization SaluteSpeech API error")
 	}
-	fmt.Println("Auth result: ", resp.String())
+	// fmt.Println("Status code: ", resp.StatusCode(), "Auth result: ", resp.String())
 
 	var authResp models.SaluteAuthResponse
 	err = json.Unmarshal(resp.Body(), &authResp)
@@ -58,6 +58,8 @@ func (c *SaluteSpeechClient) Authorization() error {
 }
 
 func (c *SaluteSpeechClient) Send(file io.ReadCloser) (models.SaluteUploadResponse, error) {
+	// fmt.Printf("Access token for Salute: %s\n", fmt.Sprintf("Bearer %s", c.accessToken))
+
 	resp, err := c.client.R().
 		SetHeader("Content-Type", "audio/mpeg").
 		SetHeader("Accept", "application/json").
@@ -66,6 +68,10 @@ func (c *SaluteSpeechClient) Send(file io.ReadCloser) (models.SaluteUploadRespon
 		Post("https://smartspeech.sber.ru/rest/v1/data:upload")
 	if err != nil {
 		return models.SaluteUploadResponse{}, fmt.Errorf("error upload file into Salute: %w", err)
+	}
+
+	if resp.StatusCode() == 401 {
+		return models.SaluteUploadResponse{}, fmt.Errorf("Status code from salute - 401")
 	}
 
 	var res models.SaluteUploadResponse
@@ -95,7 +101,6 @@ func (c *SaluteSpeechClient) StartProcess(fileID string) (models.SaluteTaskRespo
 	fmt.Println("Create task result: ", resp.String())
 	return res, nil
 }
-
 
 func (c *SaluteSpeechClient) CheckTask(taskID string) (models.SaluteTaskResponse, error) {
 	var taskStatus models.SaluteTaskResponse
@@ -127,6 +132,9 @@ func (c *SaluteSpeechClient) DownloadFile(responseFileID string) (string, error)
 		SetHeader("Accept", "application/octet-stream").
 		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
 		Get(url)
+	if err != nil {
+		return "", err
+	}
 
 	err = json.Unmarshal(resp.Body(), &fileData)
 	if err != nil {
