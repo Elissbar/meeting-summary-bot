@@ -27,6 +27,7 @@ func (h *Handler) Handle() {
 	h.Bot.Handle("/start", h.CreateUser)
 	h.Bot.Handle("/list", h.ListMeetings)
 	h.Bot.Handle("/get", h.GetMeeting)
+	h.Bot.Handle("/find", h.FindTranscription) // TODO: Стоит добавить поиск по нескольким ключевым словам.
 }
 
 func (h *Handler) CreateUser(c tg.Context) error {
@@ -70,8 +71,29 @@ func (h *Handler) GetMeeting(c tg.Context) error {
 
 	ctx, cancel := context.WithTimeout(h.Service.Ctx, time.Second*5)
 	defer cancel()
-	
+
 	transcript, err := h.Service.Storage.GetMeeting(ctx, args[0])
+	if err != nil {
+		return c.Send(err.Error())
+	}
+
+	return c.Send(fmt.Sprintf("Текст встречи: \n%s", transcript))
+}
+
+func (h *Handler) FindTranscription(c tg.Context) error {
+	userID := c.Sender().ID
+	fmt.Printf("UserID: %d.\n", userID)
+
+	args := c.Args()
+
+	if len(args) == 0 {
+		return c.Send("Пожалуйста, укажите ключевое слово для поиска. Пример: /find keyword")
+	}
+
+	ctx, cancel := context.WithTimeout(h.Service.Ctx, time.Second*5)
+	defer cancel()
+
+	transcript, err := h.Service.Storage.FindTranscription(ctx, args[0])
 	if err != nil {
 		return c.Send(err.Error())
 	}

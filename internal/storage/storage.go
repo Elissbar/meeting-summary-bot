@@ -144,6 +144,21 @@ func (db *DBStorage) GetMeeting(ctx context.Context, rowID string) (string, erro
 	return transcript, nil
 }
 
+func (db *DBStorage) FindTranscription(ctx context.Context, keyword string) (string, error) {
+	var transcript string
+
+	err := db.builder.
+		Select("transcript").
+		From("meetings").
+		Where(sq.Expr("transcription_vector @@ to_tsquery('russian', ?)", keyword)).
+		QueryRowContext(ctx).Scan(&transcript)
+	if err != nil {
+		return transcript, fmt.Errorf("scan row id error: %w", err)
+	}
+
+	return transcript, nil
+}
+
 func (db *DBStorage) CreateTask(ctx context.Context, userID int64, fileID string) (int64, error) {
 	insertQuery := db.builder.
 		Insert("meetings").
@@ -212,6 +227,7 @@ func (db *DBStorage) UpdateTasks(
 		Set("transcript", task.Transcript).
 		Set("summary", task.Summary).
 		Set("status", status).
+		Set("transcription_vector", sq.Expr("to_tsvector('russian', ?)", task.Transcript)).
 		Where(sq.Eq{"user_id": task.UserID}).
 		Where(sq.Eq{"file_id": task.FileID}).
 		ExecContext(ctx)

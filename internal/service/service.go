@@ -18,7 +18,7 @@ import (
 )
 
 type Service struct {
-	Ctx     context.Context
+	Ctx     context.Context // Знаю, что хранить контекст в структуре плохая практика, но не придумал как его еще передать.
 	salute  *salutespeech.SaluteSpeechClient
 	giga    *gigachat.GigaChatClient
 	Storage *storage.DBStorage
@@ -48,12 +48,12 @@ func NewService(
 	}
 	s.numWorkers = config.NumWorkers
 	s.GigaTasks = make(chan models.Meeting, s.numWorkers)
-	go func() {
+	go func() { // Запускаем обработку задач
 		if err := s.ProcessTasks(); err != nil {
 			fmt.Printf("Order processor stopped with error: %v\n", err)
 		}
 	}()
-	go func() {
+	go func() { // Прослушивание бота для отправки готовых задач
 		if err := bot.SendProcessedTasks(s.Results); err != nil {
 			fmt.Printf("Order processor stopped with error: %v\n", err)
 		}
@@ -88,7 +88,7 @@ func (s *Service) CreateTask(fileID string, userID int64) (int64, error) {
 }
 
 func (s *Service) ProcessTasks() error {
-	go s.gigaProcessTasks()
+	go s.gigaProcessTasks() // Запускаем клиент гиги на последовательную обработку в 1 поток 
 
 	s.wg.Add(s.numWorkers)
 	for i := range s.numWorkers {
@@ -121,8 +121,8 @@ func (s *Service) worker(workerID int) (err error) {
 	defer s.wg.Done()
 
 	for task := range s.Tasks {
-		// Если в ходе работы воркера произошла ошибка, отмечаем такие задачи в БД
 		defer func() {
+			// Если в ходе работы воркера произошла ошибка, отмечаем такие задачи в БД
 			if err != nil {
 				Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*5)
 				defer cancel()
@@ -181,6 +181,7 @@ func (s *Service) worker(workerID int) (err error) {
 }
 
 func (s *Service) markTaskInProgress(task models.Meeting) error {
+	// Отмечаем задачи в обработке, чтобы не загружать их в канал при след. тике
 	Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*3)
 	defer cancel()
 	return s.Storage.UpdateTasks(Ctx, task, "IN_PROGRESS")
@@ -220,6 +221,7 @@ func (s *Service) uploadTasksToChannel() error {
 	// fmt.Println("Одна из задач: ", rows[0])
 
 	for _, row := range rows {
+		// Если задача потеряется, она отправится в канал при след. тике
 		select {
 		case s.Tasks <- row:
 			fmt.Println("Отправили задачу в канал:", row)
