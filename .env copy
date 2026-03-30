@@ -1,0 +1,19 @@
+# Telegram bot token
+BOT_TOKEN=
+
+# Salute / GigaChat API
+AUTH_URL=https://ngw.devices.sberbank.ru:9443/api/v2/oauth
+SALUTE_AUTH_TOKEN=
+SALUTE_SCOPE=
+GIGA_AUTH_TOKEN=
+GIGA_SCOPE=
+
+# DB
+DB_URI=postgres://postgres:12345@localhost:5432/meeting_bot?sslmode=disable
+
+# Timeouts
+WAIT_PLACE_IN_TASK_CHAN=500ms # Таймаут для ожидания освобождения места в канале задач в МС
+WAIT_STOP_PROCESS_TASKS=2s    # Таймаут для прекращения добавления задач в C
+
+# Workers count
+NUM_WORKERS=5
