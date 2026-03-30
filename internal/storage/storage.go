@@ -99,6 +99,51 @@ func (db *DBStorage) CheckUser(ctx context.Context, userID int64) (bool, error) 
 	return cnt == 1, nil
 }
 
+func (db *DBStorage) GetAllMeetings(ctx context.Context, userID int64) ([]int64, error) {
+	var meetingIDs []int64 = make([]int64, 0)
+
+	rows, err := db.builder.
+		Select("id").
+		From("meetings").
+		Where(sq.Eq{"user_id": userID}).
+		QueryContext(ctx)
+	if err != nil {
+		return meetingIDs, fmt.Errorf("get all meetings error: %w", err)
+	}
+	defer rows.Close()
+	
+	for rows.Next() {
+		var id int64
+
+		if err := rows.Scan(&id); err != nil {
+			return meetingIDs, fmt.Errorf("scan meeting ID error: %w", err)
+		}
+
+		meetingIDs = append(meetingIDs, id)
+	}
+
+	if err := rows.Err(); err != nil {
+		return meetingIDs, fmt.Errorf("error iterating rows: %v", err)
+	}
+
+	return meetingIDs, nil
+}
+
+func (db *DBStorage) GetMeeting(ctx context.Context, rowID string) (string, error) {
+	var transcript string
+
+	err := db.builder.
+		Select("transcript").
+		From("meetings").
+		Where(sq.Eq{"id": rowID}).
+		QueryRowContext(ctx).Scan(&transcript)
+	if err != nil {
+		return transcript, fmt.Errorf("scan row id error: %w", err)
+	}
+
+	return transcript, nil
+}
+
 func (db *DBStorage) CreateTask(ctx context.Context, userID int64, fileID string) (int64, error) {
 	insertQuery := db.builder.
 		Insert("meetings").

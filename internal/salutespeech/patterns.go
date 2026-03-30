@@ -7,7 +7,7 @@ const task = `
     "audio_encoding": "%s",
     "sample_rate": 16000,
     "language": "ru-RU",
-    "enable_profanity_filter": false,
+    "enable_profanity_filter": true,
     "hypotheses_count": 1,
     "channels_count": 1,
     "speaker_separation_options": {

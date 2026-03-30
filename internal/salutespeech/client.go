@@ -57,7 +57,7 @@ func (c *SaluteSpeechClient) Authorization() error {
 	return nil
 }
 
-func (c *SaluteSpeechClient) Send(file io.ReadCloser) (models.SaluteUploadResponse, error) {
+func (c *SaluteSpeechClient) Send(file io.Reader) (models.SaluteUploadResponse, error) {
 	// fmt.Printf("Access token for Salute: %s\n", fmt.Sprintf("Bearer %s", c.accessToken))
 
 	resp, err := c.client.R().
@@ -82,14 +82,14 @@ func (c *SaluteSpeechClient) Send(file io.ReadCloser) (models.SaluteUploadRespon
 	return res, nil
 }
 
-func (c *SaluteSpeechClient) StartProcess(fileID string) (models.SaluteTaskResponse, error) {
+func (c *SaluteSpeechClient) StartProcess(fileID, audio_encoding string) (models.SaluteTaskResponse, error) {
 	var res models.SaluteTaskResponse
 
 	resp, err := c.client.R().
 		SetHeader("Content-Type", "application/json").
 		SetHeader("Accept", "application/json").
 		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
-		SetBody(fmt.Sprintf(task, "OPUS", true, fileID)).
+		SetBody(fmt.Sprintf(task, audio_encoding, true, fileID)).
 		Post("https://smartspeech.sber.ru/rest/v1/speech:async_recognize")
 	if err != nil {
 		return res, err

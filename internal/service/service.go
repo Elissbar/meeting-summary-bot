@@ -18,10 +18,10 @@ import (
 )
 
 type Service struct {
-	ctx     context.Context
+	Ctx     context.Context
 	salute  *salutespeech.SaluteSpeechClient
 	giga    *gigachat.GigaChatClient
-	storage *storage.DBStorage
+	Storage *storage.DBStorage
 	config  *config.Config
 	wg      *sync.WaitGroup
 	Bot     *bot.Bot
@@ -33,20 +33,20 @@ type Service struct {
 }
 
 func NewService(
-	ctx context.Context,
+	Ctx context.Context,
 	salute *salutespeech.SaluteSpeechClient,
 	giga *gigachat.GigaChatClient,
-	storage *storage.DBStorage,
+	Storage *storage.DBStorage,
 	config *config.Config,
 	wg *sync.WaitGroup,
 	bot *bot.Bot,
 ) *Service {
 	s := &Service{
-		ctx: ctx, salute: salute, giga: giga,
-		storage: storage, config: config, wg: wg, Bot: bot,
+		Ctx: Ctx, salute: salute, giga: giga,
+		Storage: Storage, config: config, wg: wg, Bot: bot,
 		Tasks: make(chan models.Meeting, 100), Results: make(chan models.Meeting, 100),
 	}
-	s.numWorkers = 5
+	s.numWorkers = config.NumWorkers
 	s.GigaTasks = make(chan models.Meeting, s.numWorkers)
 	go func() {
 		if err := s.ProcessTasks(); err != nil {
@@ -62,24 +62,24 @@ func NewService(
 }
 
 func (s *Service) CreateUser(userID int64) error {
-	ctx, cancel := context.WithTimeout(s.ctx, time.Second*10)
+	Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*10)
 	defer cancel()
 
-	return s.storage.CreateUser(ctx, userID)
+	return s.Storage.CreateUser(Ctx, userID)
 }
 
 func (s *Service) CheckUser(userID int64) (bool, error) {
-	ctx, cancel := context.WithTimeout(s.ctx, time.Second*10)
+	Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*10)
 	defer cancel()
 
-	return s.storage.CheckUser(ctx, userID)
+	return s.Storage.CheckUser(Ctx, userID)
 }
 
 func (s *Service) CreateTask(fileID string, userID int64) (int64, error) {
-	ctx, cancel := context.WithTimeout(s.ctx, time.Second*10)
+	Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*10)
 	defer cancel()
 
-	meetingID, err := s.storage.CreateTask(ctx, userID, fileID)
+	meetingID, err := s.Storage.CreateTask(Ctx, userID, fileID)
 	if err != nil {
 		return -1, err
 	}
@@ -103,7 +103,7 @@ func (s *Service) ProcessTasks() error {
 
 		// Выходим, еслы получили сигнал остановки
 		select {
-		case <-s.ctx.Done():
+		case <-s.Ctx.Done():
 			return nil
 		default:
 		}
@@ -124,9 +124,9 @@ func (s *Service) worker(workerID int) (err error) {
 		// Если в ходе работы воркера произошла ошибка, отмечаем такие задачи в БД
 		defer func() {
 			if err != nil {
-				ctx, cancel := context.WithTimeout(s.ctx, time.Second*3)
+				Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*5)
 				defer cancel()
-				s.storage.UpdateTasks(ctx, task, "FAILED")
+				s.Storage.UpdateTasks(Ctx, task, "FAILED")
 
 				task.Status = "FAILED"
 				s.Results <- task
@@ -140,7 +140,7 @@ func (s *Service) worker(workerID int) (err error) {
 		}
 
 		fmt.Println("Воркер: ", workerID, "Берем данные из канала: ", task, "Статус задач:", task.Status)
-		fileData, err := s.Bot.GetFile(task.FileID, s.config.BotToken)
+		fileData, audio_encoding, err := s.Bot.GetFile(task.FileID)
 		if err != nil {
 			return err
 		}
@@ -150,7 +150,7 @@ func (s *Service) worker(workerID int) (err error) {
 			return err
 		}
 
-		createdTask, err := s.salute.StartProcess(uploadedFile.Result.RequestFileID)
+		createdTask, err := s.salute.StartProcess(uploadedFile.Result.RequestFileID, audio_encoding)
 		if err != nil {
 			return err
 		}
@@ -181,9 +181,9 @@ func (s *Service) worker(workerID int) (err error) {
 }
 
 func (s *Service) markTaskInProgress(task models.Meeting) error {
-	ctx, cancel := context.WithTimeout(s.ctx, time.Second*3)
+	Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*3)
 	defer cancel()
-	return s.storage.UpdateTasks(ctx, task, "IN_PROGRESS")
+	return s.Storage.UpdateTasks(Ctx, task, "IN_PROGRESS")
 }
 
 func (s *Service) gigaProcessTasks() error {
@@ -194,9 +194,9 @@ func (s *Service) gigaProcessTasks() error {
 		}
 		task.Summary = chatResponse
 
-		ctx, cancel := context.WithTimeout(s.ctx, time.Second*3)
+		Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*3)
 		defer cancel()
-		err = s.storage.UpdateTasks(ctx, task, task.Status)
+		err = s.Storage.UpdateTasks(Ctx, task, task.Status)
 		if err != nil {
 			return err
 		}
@@ -208,10 +208,10 @@ func (s *Service) gigaProcessTasks() error {
 }
 
 func (s *Service) uploadTasksToChannel() error {
-	ctx, cancel := context.WithTimeout(s.ctx, time.Second*5)
+	Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*5)
 	defer cancel()
 
-	rows, err := s.storage.GetAllNewTasks(ctx)
+	rows, err := s.Storage.GetAllNewTasks(Ctx)
 	if err != nil && !errors.Is(err, myerrors.ErrNoRows) {
 		fmt.Println("Ошибка при получении новых задач: ", err)
 		return err
