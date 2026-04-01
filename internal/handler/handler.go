@@ -20,7 +20,8 @@ func NewHandler(srvc *service.Service, tgBot *tg.Bot) (*Handler, error) {
 	return &Handler{srvc, tgBot}, nil
 }
 
-func (h *Handler) Handle() {
+func (h *Handler) Handle(ctx context.Context) {
+	h.Bot.Use(h.SetContext(ctx))
 	h.Bot.Use(h.CheckUser)
 	h.Bot.Handle(tg.OnVoice, h.ProcessMeeting)
 	h.Bot.Handle(tg.OnAudio, h.ProcessMeeting)
@@ -31,8 +32,10 @@ func (h *Handler) Handle() {
 }
 
 func (h *Handler) CreateUser(c tg.Context) error {
+	ctx := c.Get("ctx").(context.Context)
+
 	userID := c.Sender().ID
-	err := h.Service.CreateUser(userID)
+	err := h.Service.CreateUser(ctx, userID)
 	if err != nil {
 		return c.Send(err.Error())
 	}
@@ -41,13 +44,15 @@ func (h *Handler) CreateUser(c tg.Context) error {
 }
 
 func (h *Handler) ListMeetings(c tg.Context) error {
+	ctx := c.Get("ctx").(context.Context)
+
 	userID := c.Sender().ID
 	fmt.Printf("UserID: %d.\n", userID)
 
-	ctx, cancel := context.WithTimeout(h.Service.Ctx, time.Second*5)
+	chCtx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
 
-	meetings, err := h.Service.Storage.GetAllMeetings(ctx, userID)
+	meetings, err := h.Service.Storage.GetAllMeetings(chCtx, userID)
 	if err != nil {
 		return c.Send(err.Error())
 	}
@@ -60,6 +65,8 @@ func (h *Handler) ListMeetings(c tg.Context) error {
 }
 
 func (h *Handler) GetMeeting(c tg.Context) error {
+	ctx := c.Get("ctx").(context.Context)
+
 	userID := c.Sender().ID
 	fmt.Printf("UserID: %d.\n", userID)
 
@@ -69,10 +76,10 @@ func (h *Handler) GetMeeting(c tg.Context) error {
 		return c.Send("Пожалуйста, укажите ID записи. Пример: /get 123")
 	}
 
-	ctx, cancel := context.WithTimeout(h.Service.Ctx, time.Second*5)
+	chCtx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
 
-	transcript, err := h.Service.Storage.GetMeeting(ctx, args[0])
+	transcript, err := h.Service.Storage.GetMeeting(chCtx, args[0])
 	if err != nil {
 		return c.Send(err.Error())
 	}
@@ -81,6 +88,8 @@ func (h *Handler) GetMeeting(c tg.Context) error {
 }
 
 func (h *Handler) FindTranscription(c tg.Context) error {
+	ctx := c.Get("ctx").(context.Context)
+
 	userID := c.Sender().ID
 	fmt.Printf("UserID: %d.\n", userID)
 
@@ -90,10 +99,10 @@ func (h *Handler) FindTranscription(c tg.Context) error {
 		return c.Send("Пожалуйста, укажите ключевое слово для поиска. Пример: /find keyword")
 	}
 
-	ctx, cancel := context.WithTimeout(h.Service.Ctx, time.Second*5)
+	chCtx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
 
-	transcript, err := h.Service.Storage.FindTranscription(ctx, args[0])
+	transcript, err := h.Service.Storage.FindTranscription(chCtx, args[0])
 	if err != nil {
 		return c.Send(err.Error())
 	}
@@ -102,6 +111,8 @@ func (h *Handler) FindTranscription(c tg.Context) error {
 }
 
 func (b *Handler) ProcessMeeting(c tg.Context) error {
+	ctx := c.Get("ctx").(context.Context)
+
 	var fileID string
 	if c.Message().Audio == nil && c.Message().Voice != nil {
 		fmt.Println("Пришло голосовое")
@@ -117,7 +128,7 @@ func (b *Handler) ProcessMeeting(c tg.Context) error {
 	userID := c.Sender().ID
 	fmt.Printf("FileID: %s. UserID: %d.\n", fileID, userID)
 
-	taskID, err := b.Service.CreateTask(fileID, userID)
+	taskID, err := b.Service.CreateTask(ctx, fileID, userID)
 	if err != nil {
 		return c.Send(err.Error())
 	}

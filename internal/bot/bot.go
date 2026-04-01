@@ -2,10 +2,10 @@ package bot
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net/http"
-	"time"
 
 	"github.com/Elissbar/meeting-summary-bot/internal/models"
 	tg "gopkg.in/telebot.v3"
@@ -15,16 +15,7 @@ type Bot struct {
 	Bot *tg.Bot
 }
 
-func NewBot(token string) (*Bot, error) {
-	bot, err := tg.NewBot(
-		tg.Settings{
-			Token:  token,
-			Poller: &tg.LongPoller{Timeout: 10 * time.Second},
-		},
-	)
-	if err != nil {
-		return nil, err
-	}
+func NewBot(bot *tg.Bot) (*Bot, error) {
 	b := &Bot{
 		Bot: bot,
 	}
@@ -60,7 +51,7 @@ func (b *Bot) GetFile(fileID string) (io.Reader, string, error) {
 		mime = "MP3"
 	case "audio/ogg", "application/ogg":
 		mime = "OPUS"
-	default: 
+	default:
 		fmt.Printf("unsupported MIME type: %s", contentType)
 		return nil, "", fmt.Errorf("unsupported MIME type: %s", contentType)
 	}
@@ -68,8 +59,14 @@ func (b *Bot) GetFile(fileID string) (io.Reader, string, error) {
 	return fileContent, mime, nil
 }
 
-func (b *Bot) SendProcessedTasks(tasks <-chan models.Meeting) error {
+func (b *Bot) SendProcessedTasks(ctx context.Context, tasks <-chan models.Meeting) error {
 	for task := range tasks {
+		select {
+		case <-ctx.Done():
+			return nil
+		default:
+		}
+		
 		recipient := &tg.Chat{ID: task.UserID}
 		var message string
 		switch task.Status { // Всего может быть 4 статуса: "CANCELED", "DONE", "ERROR", "FAILED"

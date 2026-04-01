@@ -217,7 +217,7 @@ func (db *DBStorage) GetAllNewTasks(ctx context.Context) ([]models.Meeting, erro
 func (db *DBStorage) UpdateTasks(
 	ctx context.Context,
 	task models.Meeting,
-	status string,
+	// status string,
 	// userID int64,
 	// fileID string,
 	// transcription, summary, status string,
@@ -226,7 +226,7 @@ func (db *DBStorage) UpdateTasks(
 		Update("meetings").
 		Set("transcript", task.Transcript).
 		Set("summary", task.Summary).
-		Set("status", status).
+		Set("status", task.Status).
 		Set("transcription_vector", sq.Expr("to_tsvector('russian', ?)", task.Transcript)).
 		Where(sq.Eq{"user_id": task.UserID}).
 		Where(sq.Eq{"file_id": task.FileID}).

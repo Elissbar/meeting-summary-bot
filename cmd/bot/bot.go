@@ -7,6 +7,9 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
+
+	tg "gopkg.in/telebot.v3"
 
 	"github.com/Elissbar/meeting-summary-bot/internal/bot"
 	"github.com/Elissbar/meeting-summary-bot/internal/config"
@@ -30,33 +33,51 @@ func main() {
 
 	salute := salutespeech.NewSaluteSpeechClient(config.AuthURL, config.SaluteAuthToken, config.SaluteScope)
 	giga := gigachat.NewGigaChatClient(config.AuthURL, config.GigaChatAuthToken, config.GigaChatScope)
-
 	storage, err := storage.NewDatabaseStorage(config.DBConnectionURI)
 	if err != nil {
 		panic(fmt.Errorf("create storage error: %w", err))
 	}
 
-	tgBot, err := bot.NewBot(config.BotToken)
+	tgBot, err := tg.NewBot(
+		tg.Settings{Token:  config.BotToken, Poller: &tg.LongPoller{Timeout: 10*time.Second}},
+	)
+	if err != nil {
+		panic(fmt.Errorf("create bot error: %w", err))
+	}
+
+	botClient, err := bot.NewBot(tgBot)
 	if err != nil {
 		panic(fmt.Errorf("create Bot error: %w", err))
 	}
 
 	var wg sync.WaitGroup
-	serv := service.NewService(gCtx, salute, giga, storage, config, &wg, tgBot)
+	serv := service.NewService(salute, giga, storage, config, &wg, botClient)
 
-	handler, err := handler.NewHandler(serv, tgBot.Bot)
+	handler, err := handler.NewHandler(serv, botClient.Bot)
 	if err != nil {
 		panic(fmt.Errorf("create bot error: %w", err))
 	}
 
 	grp.Go(func() error {
-		handler.Handle() // Как обработать ошибку
-		tgBot.Bot.Start()
+		handler.Handle(gCtx) // TODO: Как обработать ошибку
+		botClient.Bot.Start()
+		// Запускаем обработку задач
+		go func() {
+			if err := serv.ProcessTasks(gCtx); err != nil {
+				fmt.Printf("Order processor stopped with error: %v\n", err)
+			}
+		}()
+		// Прослушивание бота для отправки готовых задач
+		go func() {
+			if err := botClient.SendProcessedTasks(gCtx, serv.Results); err != nil {
+				fmt.Printf("Order processor stopped with error: %v\n", err)
+			}
+		}()
 		return nil
 	})
 	grp.Go(func() error {
 		<-gCtx.Done()
-		tgBot.Bot.Stop()
+		botClient.Bot.Stop()
 		close(serv.Tasks)
 		close(serv.Results)
 		close(serv.GigaTasks)

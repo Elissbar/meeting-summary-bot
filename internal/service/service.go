@@ -18,7 +18,6 @@ import (
 )
 
 type Service struct {
-	Ctx     context.Context // Знаю, что хранить контекст в структуре плохая практика, но не придумал как его еще передать.
 	salute  *salutespeech.SaluteSpeechClient
 	giga    *gigachat.GigaChatClient
 	Storage *storage.DBStorage
@@ -33,7 +32,6 @@ type Service struct {
 }
 
 func NewService(
-	Ctx context.Context,
 	salute *salutespeech.SaluteSpeechClient,
 	giga *gigachat.GigaChatClient,
 	Storage *storage.DBStorage,
@@ -42,44 +40,44 @@ func NewService(
 	bot *bot.Bot,
 ) *Service {
 	s := &Service{
-		Ctx: Ctx, salute: salute, giga: giga,
+		salute: salute, giga: giga,
 		Storage: Storage, config: config, wg: wg, Bot: bot,
 		Tasks: make(chan models.Meeting, 100), Results: make(chan models.Meeting, 100),
 	}
 	s.numWorkers = config.NumWorkers
 	s.GigaTasks = make(chan models.Meeting, s.numWorkers)
-	go func() { // Запускаем обработку задач
-		if err := s.ProcessTasks(); err != nil {
-			fmt.Printf("Order processor stopped with error: %v\n", err)
-		}
-	}()
-	go func() { // Прослушивание бота для отправки готовых задач
-		if err := bot.SendProcessedTasks(s.Results); err != nil {
-			fmt.Printf("Order processor stopped with error: %v\n", err)
-		}
-	}()
+	// go func() { // Запускаем обработку задач
+	// 	if err := s.ProcessTasks(); err != nil {
+	// 		fmt.Printf("Order processor stopped with error: %v\n", err)
+	// 	}
+	// }()
+	// go func() { // Прослушивание бота для отправки готовых задач TODO: придумать как передать сюда контекст
+	// 	if err := bot.SendProcessedTasks(s.Results); err != nil {
+	// 		fmt.Printf("Order processor stopped with error: %v\n", err)
+	// 	}
+	// }()
 	return s
 }
 
-func (s *Service) CreateUser(userID int64) error {
-	Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*10)
+func (s *Service) CreateUser(ctx context.Context, userID int64) error {
+	chCtx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
-	return s.Storage.CreateUser(Ctx, userID)
+	return s.Storage.CreateUser(chCtx, userID)
 }
 
-func (s *Service) CheckUser(userID int64) (bool, error) {
-	Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*10)
+func (s *Service) CheckUser(ctx context.Context, userID int64) (bool, error) {
+	chCxt, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
-	return s.Storage.CheckUser(Ctx, userID)
+	return s.Storage.CheckUser(chCxt, userID)
 }
 
-func (s *Service) CreateTask(fileID string, userID int64) (int64, error) {
-	Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*10)
+func (s *Service) CreateTask(ctx context.Context, fileID string, userID int64) (int64, error) {
+	chCtx, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 
-	meetingID, err := s.Storage.CreateTask(Ctx, userID, fileID)
+	meetingID, err := s.Storage.CreateTask(chCtx, userID, fileID)
 	if err != nil {
 		return -1, err
 	}
@@ -87,28 +85,32 @@ func (s *Service) CreateTask(fileID string, userID int64) (int64, error) {
 	return meetingID, nil
 }
 
-func (s *Service) ProcessTasks() error {
-	go s.gigaProcessTasks() // Запускаем клиент гиги на последовательную обработку в 1 поток 
-
+func (s *Service) ProcessTasks(ctx context.Context) error {
 	s.wg.Add(s.numWorkers)
 	for i := range s.numWorkers {
 		ind := i
-		go s.worker(ind)
+		go s.worker(ctx, ind)
 	}
 
 	ticker := time.NewTicker(time.Second * 10)
 	defer ticker.Stop()
 
 	for range ticker.C {
-
 		// Выходим, еслы получили сигнал остановки
 		select {
-		case <-s.Ctx.Done():
+		case <-ctx.Done():
 			return nil
 		default:
 		}
 
-		if err := s.uploadTasksToChannel(); err != nil {
+		if err := s.uploadTasksToChannel(ctx); err != nil {
+			return err
+		}
+	}
+
+	// Запускаем клиент гиги на последовательную обработку в 1 поток
+	for task := range s.GigaTasks {
+		if err := s.gigaProcessTasks(ctx, task); err != nil {
 			return err
 		}
 	}
@@ -116,26 +118,19 @@ func (s *Service) ProcessTasks() error {
 	return nil
 }
 
-func (s *Service) worker(workerID int) (err error) {
+func (s *Service) worker(ctx context.Context, workerID int) (err error) {
 	fmt.Printf("Run worker with ID: %d.\n", workerID)
 	defer s.wg.Done()
 
 	for task := range s.Tasks {
 		defer func() {
-			// Если в ходе работы воркера произошла ошибка, отмечаем такие задачи в БД
 			if err != nil {
-				Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*5)
-				defer cancel()
-				s.Storage.UpdateTasks(Ctx, task, "FAILED")
-
-				task.Status = "FAILED"
-				s.Results <- task
-				fmt.Println("Задача завершилась ошибкой: ", err, "Отправили задачу в канал результатов: ", task)
+				s.markAsFailed(ctx, task, err.Error())
 			}
 		}()
 
 		curStatus := task.Status
-		if err := s.markTaskInProgress(task); err != nil {
+		if err := s.markTaskInProgress(ctx, task); err != nil {
 			return err
 		}
 
@@ -175,50 +170,60 @@ func (s *Service) worker(workerID int) (err error) {
 
 		task.Status = curStatus
 		task.Transcript = transcription
-		s.GigaTasks <- task // Будем блокировать воркеры, если канал занят, но иначе не придумал, ведь Гига обрабатывает только в 1 поток.
+		s.GigaTasks <- task
 	}
 	return nil
 }
 
-func (s *Service) markTaskInProgress(task models.Meeting) error {
+func (s *Service) markAsFailed(ctx context.Context, task models.Meeting, errMessage string) {
+	// Если в ходе работы воркера произошла ошибка, отмечаем такие задачи в БД
+	chCtx, cancel := context.WithTimeout(ctx, time.Second*5)
+	defer cancel()
+
+	task.Status = "FAILED"
+	s.Storage.UpdateTasks(chCtx, task)
+
+	s.Results <- task
+	fmt.Println("Задача завершилась ошибкой: ", errMessage, "Отправили задачу в канал результатов: ", task)
+}
+
+func (s *Service) markTaskInProgress(ctx context.Context, task models.Meeting) error {
 	// Отмечаем задачи в обработке, чтобы не загружать их в канал при след. тике
-	Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*3)
+	Ctx, cancel := context.WithTimeout(ctx, time.Second*3)
 	defer cancel()
-	return s.Storage.UpdateTasks(Ctx, task, "IN_PROGRESS")
+	task.Status = "IN_PROGRESS"
+	return s.Storage.UpdateTasks(Ctx, task)
 }
 
-func (s *Service) gigaProcessTasks() error {
-	for task := range s.GigaTasks {
-		chatResponse, err := s.giga.Send(task.Transcript)
-		if err != nil {
-			return err
-		}
-		task.Summary = chatResponse
-
-		Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*3)
-		defer cancel()
-		err = s.Storage.UpdateTasks(Ctx, task, task.Status)
-		if err != nil {
-			return err
-		}
-
-		s.Results <- task
-		fmt.Println("Отправили задачу в канал результатов:", task)
+func (s *Service) gigaProcessTasks(ctx context.Context, task models.Meeting) error {
+	chatResponse, err := s.giga.Send(task.Transcript)
+	if err != nil {
+		return err
 	}
+	task.Summary = chatResponse
+
+	chCtx, cancel := context.WithTimeout(ctx, time.Second*3)
+	defer cancel()
+	err = s.Storage.UpdateTasks(chCtx, task)
+	if err != nil {
+		return err
+	}
+
+	s.Results <- task
+	fmt.Println("Отправили задачу в канал результатов:", task)
 	return nil
 }
 
-func (s *Service) uploadTasksToChannel() error {
-	Ctx, cancel := context.WithTimeout(s.Ctx, time.Second*5)
+func (s *Service) uploadTasksToChannel(ctx context.Context) error {
+	chCtx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
 
-	rows, err := s.Storage.GetAllNewTasks(Ctx)
+	rows, err := s.Storage.GetAllNewTasks(chCtx)
 	if err != nil && !errors.Is(err, myerrors.ErrNoRows) {
 		fmt.Println("Ошибка при получении новых задач: ", err)
 		return err
 	}
 	fmt.Println("Получили задачи из БД в статусе NEW. Кол-во:", len(rows))
-	// fmt.Println("Одна из задач: ", rows[0])
 
 	for _, row := range rows {
 		// Если задача потеряется, она отправится в канал при след. тике
