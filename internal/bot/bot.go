@@ -75,7 +75,7 @@ func (b *Bot) SendProcessedTasks(ctx context.Context, tasks <-chan models.Meetin
 		case "CANCELED":
 			message = fmt.Sprintf("Задача №%d была отменена.", task.ID)
 		default:
-			message = fmt.Sprintf("Задача №%d была завершена с ошибкой.", task.ID)
+			message = fmt.Sprintf("Задача №%d была завершена с ошибкой. Попробуйте позже.", task.ID)
 		}
 		b.Bot.Send(recipient, message)
 	}

@@ -58,8 +58,6 @@ func (c *SaluteSpeechClient) Authorization() error {
 }
 
 func (c *SaluteSpeechClient) Send(file io.Reader) (models.SaluteUploadResponse, error) {
-	// fmt.Printf("Access token for Salute: %s\n", fmt.Sprintf("Bearer %s", c.accessToken))
-
 	resp, err := c.client.R().
 		SetHeader("Content-Type", "audio/mpeg").
 		SetHeader("Accept", "application/json").

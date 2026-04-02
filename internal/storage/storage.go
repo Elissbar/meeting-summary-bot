@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"iter"
 
 	myerrors "github.com/Elissbar/meeting-summary-bot/internal/errors"
 	"github.com/Elissbar/meeting-summary-bot/internal/models"
@@ -99,34 +100,37 @@ func (db *DBStorage) CheckUser(ctx context.Context, userID int64) (bool, error) 
 	return cnt == 1, nil
 }
 
-func (db *DBStorage) GetAllMeetings(ctx context.Context, userID int64) ([]int64, error) {
-	var meetingIDs []int64 = make([]int64, 0)
+func (db *DBStorage) GetAllMeetings(ctx context.Context, userID int64) iter.Seq2[int64, error] {
+	return func(yield func(int64, error) bool) {
+		rows, err := db.builder.
+			Select("id").
+			From("meetings").
+			Where(sq.Eq{"user_id": userID}).
+			QueryContext(ctx)
+		if err != nil {
+			yield(0, fmt.Errorf("get all meetings error: %w", err))
+			return
+		}
+		defer rows.Close()
 
-	rows, err := db.builder.
-		Select("id").
-		From("meetings").
-		Where(sq.Eq{"user_id": userID}).
-		QueryContext(ctx)
-	if err != nil {
-		return meetingIDs, fmt.Errorf("get all meetings error: %w", err)
-	}
-	defer rows.Close()
-	
-	for rows.Next() {
-		var id int64
+		for rows.Next() {
+			var id int64
 
-		if err := rows.Scan(&id); err != nil {
-			return meetingIDs, fmt.Errorf("scan meeting ID error: %w", err)
+			if err := rows.Scan(&id); err != nil {
+				yield(0, fmt.Errorf("scan meeting ID error: %w", err))
+				return
+			}
+
+			if !yield(id, nil) {
+				return
+			}
 		}
 
-		meetingIDs = append(meetingIDs, id)
+		if err := rows.Err(); err != nil {
+			yield(0, fmt.Errorf("error iterating rows: %v", err))
+			return
+		}
 	}
-
-	if err := rows.Err(); err != nil {
-		return meetingIDs, fmt.Errorf("error iterating rows: %v", err)
-	}
-
-	return meetingIDs, nil
 }
 
 func (db *DBStorage) GetMeeting(ctx context.Context, rowID string) (string, error) {
@@ -175,53 +179,49 @@ func (db *DBStorage) CreateTask(ctx context.Context, userID int64, fileID string
 	return lastInsertID, nil
 }
 
-func (db *DBStorage) GetAllNewTasks(ctx context.Context) ([]models.Meeting, error) {
-	var meetings []models.Meeting
-
-	rows, err := db.builder.
-		Select("id", "user_id", "file_id", "status").
-		From("meetings").
-		Where(sq.Eq{"status": "NEW"}).
-		QueryContext(ctx)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return meetings, myerrors.ErrNoRows
-		}
-		return meetings, fmt.Errorf("get all NEW tasks error: %w", err)
-	}
-	defer rows.Close()
-
-	for rows.Next() {
-		var meeting models.Meeting
-
-		err := rows.Scan(
-			&meeting.ID,
-			&meeting.UserID,
-			&meeting.FileID,
-			&meeting.Status,
-		)
+func (db *DBStorage) GetAllNewTasks(ctx context.Context) iter.Seq2[models.Meeting, error] {
+	return func(yield func(models.Meeting, error) bool) {
+		rows, err := db.builder.
+			Select("id", "user_id", "file_id", "status").
+			From("meetings").
+			Where(sq.Eq{"status": "NEW"}).
+			QueryContext(ctx)
 		if err != nil {
-			return nil, fmt.Errorf("scan task row error: %w", err)
+			if errors.Is(err, sql.ErrNoRows) {
+				yield(models.Meeting{}, myerrors.ErrNoRows)
+				return
+			}
+			yield(models.Meeting{}, fmt.Errorf("get all NEW tasks error: %w", err))
+			return
+		}
+		defer rows.Close()
+
+		for rows.Next() {
+			var meeting models.Meeting
+
+			err := rows.Scan(
+				&meeting.ID,
+				&meeting.UserID,
+				&meeting.FileID,
+				&meeting.Status,
+			)
+			if err != nil {
+				yield(models.Meeting{}, fmt.Errorf("scan task row error: %w", err))
+				return
+			}
+
+			if !yield(meeting, nil) {
+				return
+			}
 		}
 
-		meetings = append(meetings, meeting)
+		if err := rows.Err(); err != nil {
+			yield(models.Meeting{}, fmt.Errorf("error iterating rows: %v", err))
+		}
 	}
-
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("error iterating rows: %v", err)
-	}
-
-	return meetings, nil
 }
 
-func (db *DBStorage) UpdateTasks(
-	ctx context.Context,
-	task models.Meeting,
-	// status string,
-	// userID int64,
-	// fileID string,
-	// transcription, summary, status string,
-) error {
+func (db *DBStorage) UpdateTasks(ctx context.Context, task models.Meeting) error {
 	_, err := db.builder.
 		Update("meetings").
 		Set("transcript", task.Transcript).

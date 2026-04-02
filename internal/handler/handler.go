@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -49,19 +48,12 @@ func (h *Handler) ListMeetings(c tg.Context) error {
 	userID := c.Sender().ID
 	fmt.Printf("UserID: %d.\n", userID)
 
-	chCtx, cancel := context.WithTimeout(ctx, time.Second*5)
-	defer cancel()
-
-	meetings, err := h.Service.Storage.GetAllMeetings(chCtx, userID)
+	meetings, err := h.Service.GetAllMeetings(ctx, userID)
 	if err != nil {
 		return c.Send(err.Error())
 	}
 
-	meetingsStr := make([]string, len(meetings))
-	for i, v := range meetings {
-		meetingsStr[i] = strconv.FormatInt(v, 10) // Convert int to string
-	}
-	return c.Send(fmt.Sprintf("Список ваших сохраненных встреч: %s", strings.Join(meetingsStr, ", ")))
+	return c.Send(fmt.Sprintf("Список ваших сохраненных встреч: %s", strings.Join(meetings, ", ")))
 }
 
 func (h *Handler) GetMeeting(c tg.Context) error {
@@ -79,7 +71,7 @@ func (h *Handler) GetMeeting(c tg.Context) error {
 	chCtx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
 
-	transcript, err := h.Service.Storage.GetMeeting(chCtx, args[0])
+	transcript, err := h.Service.GetMeeting(chCtx, args[0])
 	if err != nil {
 		return c.Send(err.Error())
 	}
@@ -102,7 +94,7 @@ func (h *Handler) FindTranscription(c tg.Context) error {
 	chCtx, cancel := context.WithTimeout(ctx, time.Second*5)
 	defer cancel()
 
-	transcript, err := h.Service.Storage.FindTranscription(chCtx, args[0])
+	transcript, err := h.Service.FindTranscription(chCtx, args[0])
 	if err != nil {
 		return c.Send(err.Error())
 	}

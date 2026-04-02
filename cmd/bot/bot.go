@@ -33,7 +33,7 @@ func main() {
 
 	salute := salutespeech.NewSaluteSpeechClient(config.AuthURL, config.SaluteAuthToken, config.SaluteScope)
 	giga := gigachat.NewGigaChatClient(config.AuthURL, config.GigaChatAuthToken, config.GigaChatScope)
-	storage, err := storage.NewDatabaseStorage(config.DBConnectionURI)
+	storage, err := storage.NewStorage(config.DBConnectionURI)
 	if err != nil {
 		panic(fmt.Errorf("create storage error: %w", err))
 	}
@@ -59,21 +59,15 @@ func main() {
 	}
 
 	grp.Go(func() error {
-		handler.Handle(gCtx) // TODO: Как обработать ошибку
+		handler.Handle(gCtx)
 		botClient.Bot.Start()
-		// Запускаем обработку задач
-		go func() {
-			if err := serv.ProcessTasks(gCtx); err != nil {
-				fmt.Printf("Order processor stopped with error: %v\n", err)
-			}
-		}()
-		// Прослушивание бота для отправки готовых задач
-		go func() {
-			if err := botClient.SendProcessedTasks(gCtx, serv.Results); err != nil {
-				fmt.Printf("Order processor stopped with error: %v\n", err)
-			}
-		}()
 		return nil
+	})
+	grp.Go(func() error {
+		return serv.ProcessTasks(gCtx)
+	})
+	grp.Go(func() error {
+		return botClient.SendProcessedTasks(gCtx, serv.Results)
 	})
 	grp.Go(func() error {
 		<-gCtx.Done()
