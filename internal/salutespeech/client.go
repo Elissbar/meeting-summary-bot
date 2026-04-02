@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/Elissbar/meeting-summary-bot/internal/models"
 	"github.com/go-resty/resty/v2"
@@ -31,6 +32,15 @@ func NewSaluteSpeechClient(authURL, authToken, scope string) *SaluteSpeechClient
 }
 
 func (c *SaluteSpeechClient) Authorization() error {
+	err := c.auth()
+	if err != nil {
+		return fmt.Errorf("authorization SaluteSpeech API error")
+	}
+
+	return nil
+}
+
+func (c *SaluteSpeechClient) auth() error {
 	uuid := uuid.NewString()
 
 	resp, err := c.client.R().
@@ -43,17 +53,26 @@ func (c *SaluteSpeechClient) Authorization() error {
 	if err != nil {
 		return fmt.Errorf("authorization SaluteSpeech API error")
 	}
-	// fmt.Println("Status code: ", resp.StatusCode(), "Auth result: ", resp.String())
 
 	var authResp models.SaluteAuthResponse
-	err = json.Unmarshal(resp.Body(), &authResp)
-	if err != nil {
+	if err := json.Unmarshal(resp.Body(), &authResp); err != nil {
 		return fmt.Errorf("error unmarshal SaluteSpeech API authorization")
 	}
 
 	c.accessToken = authResp.AccessToken
 	c.expiresAt = authResp.ExpiresAt
+	return nil
+}
 
+func (c *SaluteSpeechClient) UpdateToken() error {
+	// Если авторизация просрочилась - обновляем
+	expTime := time.Unix(c.expiresAt, 0).Add(-15 * time.Second)
+	if time.Now().After(expTime) {
+		err := c.auth()
+		if err != nil {
+			return fmt.Errorf("authorization SaluteSpeech API error")
+		}
+	}
 	return nil
 }
 

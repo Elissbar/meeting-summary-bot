@@ -3,6 +3,7 @@ package gigachat
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Elissbar/meeting-summary-bot/internal/models"
 	"github.com/go-resty/resty/v2"
@@ -30,6 +31,15 @@ func NewGigaChatClient(authURL, authToken, scope string) *GigaChatClient {
 }
 
 func (c *GigaChatClient) Authorization() error {
+	err := c.auth()
+	if err != nil {
+		return fmt.Errorf("authorization SaluteSpeech API error")
+	}
+
+	return nil
+}
+
+func (c *GigaChatClient) auth() error {
 	uuid := uuid.NewString()
 
 	resp, err := c.client.R().
@@ -42,7 +52,6 @@ func (c *GigaChatClient) Authorization() error {
 	if err != nil {
 		return fmt.Errorf("authorization SaluteSpeech API error")
 	}
-	// fmt.Println("Giga Status code: ", resp.StatusCode(), "Auth result: ", resp.String())
 
 	var authResp models.SaluteAuthResponse
 	err = json.Unmarshal(resp.Body(), &authResp)
@@ -53,6 +62,18 @@ func (c *GigaChatClient) Authorization() error {
 	c.accessToken = authResp.AccessToken
 	c.expiresAt = authResp.ExpiresAt
 
+	return nil
+}
+
+func (c *GigaChatClient) UpdateToken() error {
+	// Если авторизация просрочилась - обновляем
+	expTime := time.Unix(c.expiresAt, 0).Add(-15 * time.Second)
+	if time.Now().After(expTime) {
+		err := c.auth()
+		if err != nil {
+			return fmt.Errorf("authorization SaluteSpeech API error")
+		}
+	}
 	return nil
 }
 
