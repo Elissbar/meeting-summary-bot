@@ -56,14 +56,16 @@ func (c *GigaChatClient) Authorization() error {
 	return nil
 }
 
-func (c *GigaChatClient) Send(data string) (string, error) {
-	// fmt.Print("Access token for GigaChat:", fmt.Sprintf("Bearer %s", c.accessToken))
-
+func (c *GigaChatClient) Send(data string, chat bool) (string, error) {
+	prompt := processTranscriptionPrompt
+	if chat { // Команда /chat
+		prompt = userQuestion
+	}
 	resp, err := c.client.R().
 		SetHeader("Content-Type", "audio/mpeg").
 		SetHeader("Accept", "application/json").
 		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
-		SetBody(fmt.Sprintf(request, data)).
+		SetBody(fmt.Sprintf(prompt, data)).
 		Post("https://gigachat.devices.sberbank.ru/api/v1/chat/completions")
 	if err != nil {
 		return "", fmt.Errorf("error upload file into Salute: %w", err)

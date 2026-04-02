@@ -28,6 +28,7 @@ func (h *Handler) Handle(ctx context.Context) {
 	h.Bot.Handle("/list", h.ListMeetings)
 	h.Bot.Handle("/get", h.GetMeeting)
 	h.Bot.Handle("/find", h.FindTranscription) // TODO: Стоит добавить поиск по нескольким ключевым словам.
+	h.Bot.Handle("/chat", h.SendRequest)
 }
 
 func (h *Handler) CreateUser(c tg.Context) error {
@@ -126,4 +127,16 @@ func (b *Handler) ProcessMeeting(c tg.Context) error {
 	}
 
 	return c.Send(fmt.Sprintf("File in process. ID: %d", taskID))
+}
+
+
+func (b *Handler) SendRequest(c tg.Context) error {
+	prompt := c.Message().Payload
+	
+	response, err := b.Service.RequestToChat(prompt)
+	if err != nil {
+		return c.Send(err.Error())
+	}
+	
+	return c.Send(response)
 }

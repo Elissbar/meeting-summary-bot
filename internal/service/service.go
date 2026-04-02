@@ -115,6 +115,10 @@ func (s *Service) FindTranscription(ctx context.Context, keyword string) (string
 	return transcript, nil
 }
 
+func (s *Service) RequestToChat(prompt string) (string, error) {
+	return s.giga.Send(prompt, true)
+}
+
 func (s *Service) ProcessTasks(ctx context.Context) error {
 	s.wg.Add(s.numWorkers)
 	for i := range s.numWorkers {
@@ -232,7 +236,7 @@ func (s *Service) gigaProcessTasks(ctx context.Context, task models.Meeting) (er
 		}
 	}()
 
-	chatResponse, err := s.giga.Send(task.Transcript)
+	chatResponse, err := s.giga.Send(task.Transcript, false)
 	if err != nil {
 		return err
 	}

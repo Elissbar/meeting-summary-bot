@@ -1,7 +1,7 @@
 package gigachat
 
 // Промпрт, подходящий для встреч - Выдели основные темы обсуждения, ключевые договоренности, вопросы, которые были заданы в ходе встречи
-const request = `
+const processTranscriptionPrompt = `
 {
   "model": "GigaChat",
   "messages": [
@@ -9,6 +9,19 @@ const request = `
       "role": "system",
       "content": "Ты помощник, делаешь краткое описание из предоставленной транскрипции. Выдели основные моменты того, о чем говорится в тексте."
     },
+    {
+      "role": "user",
+      "content": "%s"
+    }
+  ],
+  "stream": false,
+  "repetition_penalty": 1
+}`
+
+const userQuestion = `
+{
+  "model": "GigaChat",
+  "messages": [
     {
       "role": "user",
       "content": "%s"
