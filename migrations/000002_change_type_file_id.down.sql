@@ -1,0 +1,1 @@
+ALTER TABLE meetings ALTER COLUMN file_id TYPE VARCHAR(50);

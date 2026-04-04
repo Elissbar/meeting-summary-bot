@@ -1,0 +1,162 @@
+package salutespeech
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log/slog"
+	"time"
+
+	"github.com/Elissbar/meeting-summary-bot/internal/models"
+	"github.com/go-resty/resty/v2"
+	"github.com/google/uuid"
+)
+
+type SaluteSpeechClient struct {
+	AuthURL     string
+	AuthToken   string
+	Scope       string
+	client      *resty.Client
+	accessToken string
+	expiresAt   int64
+	log         *slog.Logger
+}
+
+func NewSaluteSpeechClient(authURL, authToken, scope string, log *slog.Logger) *SaluteSpeechClient {
+	salute := &SaluteSpeechClient{
+		AuthURL:   authURL,
+		AuthToken: authToken,
+		Scope:     scope,
+		client:    resty.New(),
+		log:       log,
+	}
+	salute.Authorization()
+	return salute
+}
+
+func (c *SaluteSpeechClient) Authorization() error {
+	err := c.auth()
+	if err != nil {
+		return fmt.Errorf("authorization SaluteSpeech API error")
+	}
+
+	return nil
+}
+
+func (c *SaluteSpeechClient) auth() error {
+	uuid := uuid.NewString()
+
+	resp, err := c.client.R().
+		SetHeader("Content-Type", "application/x-www-form-urlencoded").
+		SetHeader("Accept", "application/json").
+		SetHeader("RqUID", uuid).
+		SetHeader("Authorization", fmt.Sprintf("Basic %s", c.AuthToken)).
+		SetFormData(map[string]string{"scope": c.Scope}).
+		Post(c.AuthURL)
+	if err != nil {
+		return fmt.Errorf("authorization SaluteSpeech API error")
+	}
+
+	var authResp models.SaluteAuthResponse
+	if err := json.Unmarshal(resp.Body(), &authResp); err != nil {
+		return fmt.Errorf("error unmarshal SaluteSpeech API authorization")
+	}
+
+	c.accessToken = authResp.AccessToken
+	c.expiresAt = authResp.ExpiresAt
+	return nil
+}
+
+func (c *SaluteSpeechClient) UpdateToken() error {
+	// Если авторизация просрочилась - обновляем
+	expTime := time.Unix(c.expiresAt, 0).Add(-15 * time.Second)
+	if time.Now().After(expTime) {
+		err := c.auth()
+		if err != nil {
+			return fmt.Errorf("authorization SaluteSpeech API error")
+		}
+	}
+	return nil
+}
+
+func (c *SaluteSpeechClient) Send(file io.Reader) (models.SaluteUploadResponse, error) {
+	if err := c.UpdateToken(); err != nil {
+		return models.SaluteUploadResponse{}, err
+	}
+	resp, err := c.client.R().
+		SetHeader("Content-Type", "audio/mpeg").
+		SetHeader("Accept", "application/json").
+		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
+		SetBody(file).
+		Post("https://smartspeech.sber.ru/rest/v1/data:upload")
+	if err != nil {
+		return models.SaluteUploadResponse{}, fmt.Errorf("error upload file into Salute: %w", err)
+	}
+
+	if resp.StatusCode() == 401 {
+		return models.SaluteUploadResponse{}, fmt.Errorf("Status code from salute - 401")
+	}
+
+	var res models.SaluteUploadResponse
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return models.SaluteUploadResponse{}, fmt.Errorf("error unmarshall salute upload response: %w", err)
+	}
+	return res, nil
+}
+
+func (c *SaluteSpeechClient) StartProcess(fileID, audio_encoding string) (models.SaluteTaskResponse, error) {
+	var res models.SaluteTaskResponse
+
+	resp, err := c.client.R().
+		SetHeader("Content-Type", "application/json").
+		SetHeader("Accept", "application/json").
+		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
+		SetBody(fmt.Sprintf(task, audio_encoding, true, fileID)).
+		Post("https://smartspeech.sber.ru/rest/v1/speech:async_recognize")
+	if err != nil {
+		return res, err
+	}
+
+	if err := json.Unmarshal(resp.Body(), &res); err != nil {
+		return res, fmt.Errorf("error unmarshall salute create task response: %w", err)
+	}
+	return res, nil
+}
+
+func (c *SaluteSpeechClient) CheckTask(taskID string) (models.SaluteTaskResponse, error) {
+	var taskStatus models.SaluteTaskResponse
+
+	url := fmt.Sprintf("https://smartspeech.sber.ru/rest/v1/task:get?id=%s", taskID)
+
+	_, err := c.client.R().
+		SetHeader("Accept", "application/octet-stream").
+		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
+		SetResult(&taskStatus).
+		Get(url)
+	if err != nil {
+		return models.SaluteTaskResponse{}, err
+	}
+
+	return taskStatus, nil
+}
+
+func (c *SaluteSpeechClient) DownloadFile(responseFileID string) (string, error) {
+	var fileData []models.SaluteParsedFile
+
+	url := fmt.Sprintf("https://smartspeech.sber.ru/rest/v1/data:download?response_file_id=%s", responseFileID)
+
+	resp, err := c.client.R().
+		SetHeader("Accept", "application/octet-stream").
+		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
+		Get(url)
+	if err != nil {
+		return "", err
+	}
+
+	err = json.Unmarshal(resp.Body(), &fileData)
+	if err != nil {
+		return "", err
+	}
+
+	return fileData[0].Results[0].NormalizedText, nil
+}
