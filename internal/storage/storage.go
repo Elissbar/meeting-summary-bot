@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"iter"
+	"log/slog"
 
 	myerrors "github.com/Elissbar/meeting-summary-bot/internal/errors"
 	"github.com/Elissbar/meeting-summary-bot/internal/models"
@@ -22,9 +23,10 @@ import (
 type DBStorage struct {
 	DB      *sql.DB
 	builder sq.StatementBuilderType
+	log     *slog.Logger
 }
 
-func NewDatabaseStorage(connectionData string) (*DBStorage, error) {
+func NewDatabaseStorage(connectionData string, log *slog.Logger) (*DBStorage, error) {
 	db, err := sql.Open("postgres", connectionData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
@@ -35,7 +37,7 @@ func NewDatabaseStorage(connectionData string) (*DBStorage, error) {
 	}
 
 	psql := sq.StatementBuilder.PlaceholderFormat(sq.Dollar).RunWith(db)
-	storage := &DBStorage{db, psql}
+	storage := &DBStorage{db, psql, log}
 
 	// ВТОРОЕ: применяем миграции
 	if err := storage.Migrate(); err != nil {

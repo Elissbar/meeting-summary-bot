@@ -18,6 +18,7 @@ import (
 	"github.com/Elissbar/meeting-summary-bot/internal/salutespeech"
 	"github.com/Elissbar/meeting-summary-bot/internal/service"
 	"github.com/Elissbar/meeting-summary-bot/internal/storage"
+	"github.com/Elissbar/meeting-summary-bot/pkg/logger"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -31,29 +32,31 @@ func main() {
 		panic(fmt.Errorf("get config: %w", err))
 	}
 
-	salute := salutespeech.NewSaluteSpeechClient(config.AuthURL, config.SaluteAuthToken, config.SaluteScope)
-	giga := gigachat.NewGigaChatClient(config.AuthURL, config.GigaChatAuthToken, config.GigaChatScope)
-	storage, err := storage.NewStorage(config.DBConnectionURI)
+	log := logger.NewLogger()
+
+	salute := salutespeech.NewSaluteSpeechClient(config.AuthURL, config.SaluteAuthToken, config.SaluteScope, log)
+	giga := gigachat.NewGigaChatClient(config.AuthURL, config.GigaChatAuthToken, config.GigaChatScope, log)
+	storage, err := storage.NewStorage(config.DBConnectionURI, log)
 	if err != nil {
 		panic(fmt.Errorf("create storage error: %w", err))
 	}
 
 	tgBot, err := tg.NewBot(
-		tg.Settings{Token:  config.BotToken, Poller: &tg.LongPoller{Timeout: 10*time.Second}},
+		tg.Settings{Token: config.BotToken, Poller: &tg.LongPoller{Timeout: 10 * time.Second}},
 	)
 	if err != nil {
 		panic(fmt.Errorf("create bot error: %w", err))
 	}
 
-	botClient, err := bot.NewBot(tgBot)
+	botClient, err := bot.NewBot(tgBot, log)
 	if err != nil {
 		panic(fmt.Errorf("create Bot error: %w", err))
 	}
 
 	var wg sync.WaitGroup
-	serv := service.NewService(salute, giga, storage, config, &wg, botClient)
+	serv := service.NewService(salute, giga, storage, config, &wg, botClient, log)
 
-	handler, err := handler.NewHandler(serv, botClient.Bot)
+	handler, err := handler.NewHandler(serv, botClient.Bot, log)
 	if err != nil {
 		panic(fmt.Errorf("create bot error: %w", err))
 	}
@@ -79,9 +82,9 @@ func main() {
 	})
 
 	if err := grp.Wait(); err != nil {
-		fmt.Printf("Application error: %v\n", err)
+		log.Error("Application error.", "Error: ", err.Error())
 		os.Exit(1)
 	}
 
-	fmt.Println("Bot stopped")
+	log.Info("Bot stopped")
 }

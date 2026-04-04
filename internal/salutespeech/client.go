@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"time"
 
 	"github.com/Elissbar/meeting-summary-bot/internal/models"
@@ -18,14 +19,16 @@ type SaluteSpeechClient struct {
 	client      *resty.Client
 	accessToken string
 	expiresAt   int64
+	log         *slog.Logger
 }
 
-func NewSaluteSpeechClient(authURL, authToken, scope string) *SaluteSpeechClient {
+func NewSaluteSpeechClient(authURL, authToken, scope string, log *slog.Logger) *SaluteSpeechClient {
 	salute := &SaluteSpeechClient{
 		AuthURL:   authURL,
 		AuthToken: authToken,
 		Scope:     scope,
 		client:    resty.New(),
+		log:       log,
 	}
 	salute.Authorization()
 	return salute
@@ -77,6 +80,9 @@ func (c *SaluteSpeechClient) UpdateToken() error {
 }
 
 func (c *SaluteSpeechClient) Send(file io.Reader) (models.SaluteUploadResponse, error) {
+	if err := c.UpdateToken(); err != nil {
+		return models.SaluteUploadResponse{}, err
+	}
 	resp, err := c.client.R().
 		SetHeader("Content-Type", "audio/mpeg").
 		SetHeader("Accept", "application/json").
@@ -95,7 +101,6 @@ func (c *SaluteSpeechClient) Send(file io.Reader) (models.SaluteUploadResponse, 
 	if err := json.Unmarshal(resp.Body(), &res); err != nil {
 		return models.SaluteUploadResponse{}, fmt.Errorf("error unmarshall salute upload response: %w", err)
 	}
-	fmt.Println("Upload file result: ", resp.String())
 	return res, nil
 }
 
@@ -115,7 +120,6 @@ func (c *SaluteSpeechClient) StartProcess(fileID, audio_encoding string) (models
 	if err := json.Unmarshal(resp.Body(), &res); err != nil {
 		return res, fmt.Errorf("error unmarshall salute create task response: %w", err)
 	}
-	fmt.Println("Create task result: ", resp.String())
 	return res, nil
 }
 
@@ -123,16 +127,13 @@ func (c *SaluteSpeechClient) CheckTask(taskID string) (models.SaluteTaskResponse
 	var taskStatus models.SaluteTaskResponse
 
 	url := fmt.Sprintf("https://smartspeech.sber.ru/rest/v1/task:get?id=%s", taskID)
-	fmt.Println("Check file status URL: ", url)
 
-	resp, err := c.client.R().
+	_, err := c.client.R().
 		SetHeader("Accept", "application/octet-stream").
 		SetHeader("Authorization", fmt.Sprintf("Bearer %s", c.accessToken)).
 		SetResult(&taskStatus).
 		Get(url)
-	fmt.Println("Check task status: ", resp.String())
 	if err != nil {
-		fmt.Println("err:", err.Error())
 		return models.SaluteTaskResponse{}, err
 	}
 
@@ -143,7 +144,6 @@ func (c *SaluteSpeechClient) DownloadFile(responseFileID string) (string, error)
 	var fileData []models.SaluteParsedFile
 
 	url := fmt.Sprintf("https://smartspeech.sber.ru/rest/v1/data:download?response_file_id=%s", responseFileID)
-	fmt.Println("Download file URL: ", url)
 
 	resp, err := c.client.R().
 		SetHeader("Accept", "application/octet-stream").
@@ -157,7 +157,6 @@ func (c *SaluteSpeechClient) DownloadFile(responseFileID string) (string, error)
 	if err != nil {
 		return "", err
 	}
-	fmt.Println("Download file result: ", fileData[0].Results[0].NormalizedText)
 
 	return fileData[0].Results[0].NormalizedText, nil
 }

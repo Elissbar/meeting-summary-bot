@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"github.com/Elissbar/meeting-summary-bot/internal/models"
@@ -13,11 +14,13 @@ import (
 
 type Bot struct {
 	Bot *tg.Bot
+	log *slog.Logger
 }
 
-func NewBot(bot *tg.Bot) (*Bot, error) {
+func NewBot(bot *tg.Bot, log *slog.Logger) (*Bot, error) {
 	b := &Bot{
 		Bot: bot,
+		log: log,
 	}
 
 	return b, nil
@@ -52,7 +55,7 @@ func (b *Bot) GetFile(fileID string) (io.Reader, string, error) {
 	case "audio/ogg", "application/ogg":
 		mime = "OPUS"
 	default:
-		fmt.Printf("unsupported MIME type: %s", contentType)
+		b.log.Info("unsupported MIME type.", "Type:", contentType)
 		return nil, "", fmt.Errorf("unsupported MIME type: %s", contentType)
 	}
 
@@ -66,7 +69,7 @@ func (b *Bot) SendProcessedTasks(ctx context.Context, tasks <-chan models.Meetin
 			return nil
 		default:
 		}
-		
+
 		recipient := &tg.Chat{ID: task.UserID}
 		var message string
 		switch task.Status { // Всего может быть 4 статуса: "CANCELED", "DONE", "ERROR", "FAILED"

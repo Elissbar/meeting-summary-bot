@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"iter"
+	"log/slog"
 
 	"github.com/Elissbar/meeting-summary-bot/internal/models"
 )
@@ -30,6 +31,6 @@ type MeetingRepository interface {
 	FindTranscription(ctx context.Context, keyword string) (string, error)
 }
 
-func NewStorage(dbConnectionURI string) (Repository, error) {
-	return NewDatabaseStorage(dbConnectionURI)
+func NewStorage(dbConnectionURI string, log *slog.Logger) (Repository, error) {
+	return NewDatabaseStorage(dbConnectionURI, log)
 }

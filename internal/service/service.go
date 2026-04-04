@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 	"errors"
-	"fmt"
+	"log/slog"
 	"slices"
 	"strconv"
 	"sync"
@@ -30,6 +30,7 @@ type Service struct {
 	Tasks      chan models.Meeting
 	Results    chan models.Meeting
 	GigaTasks  chan models.Meeting
+	log        *slog.Logger
 }
 
 func NewService(
@@ -39,12 +40,13 @@ func NewService(
 	config *config.Config,
 	wg *sync.WaitGroup,
 	bot *bot.Bot,
+	log *slog.Logger,
 ) *Service {
 	s := &Service{
 		salute: salute, giga: giga,
 		storage: storage, config: config, wg: wg, bot: bot, numWorkers: config.NumWorkers,
 		Tasks: make(chan models.Meeting, 100), Results: make(chan models.Meeting, 100),
-		GigaTasks: make(chan models.Meeting, config.NumWorkers),
+		GigaTasks: make(chan models.Meeting, config.NumWorkers), log: log,
 	}
 	return s
 }
@@ -153,7 +155,7 @@ func (s *Service) ProcessTasks(ctx context.Context) error {
 }
 
 func (s *Service) worker(ctx context.Context, workerID int) (err error) {
-	fmt.Printf("Run worker with ID: %d.\n", workerID)
+	s.log.Info("Воркер запущен.", "ID:", workerID)
 	defer s.wg.Done()
 
 	for task := range s.Tasks {
@@ -168,7 +170,7 @@ func (s *Service) worker(ctx context.Context, workerID int) (err error) {
 			return err
 		}
 
-		fmt.Println("Воркер: ", workerID, "Берем данные из канала: ", task, "Статус задач:", task.Status)
+		s.log.Info("Воркер берет данные из канала.", "ID воркера: ", workerID, "Задача из канала: ", task)
 		fileData, audio_encoding, err := s.bot.GetFile(task.FileID)
 		if err != nil {
 			return err
@@ -216,7 +218,7 @@ func (s *Service) markAsFailed(ctx context.Context, task models.Meeting, errMess
 
 	task.Status = "FAILED"
 	s.Results <- task
-	fmt.Println("Задача завершилась ошибкой: ", errMessage, "Отправили задачу в канал результатов: ", task)
+	s.log.Info("Задача завершилась ошибкой", "Текст ошибки:", errMessage, "Отправили задачу в канал результатов: ", task)
 
 	return s.storage.UpdateTasks(chCtx, task)
 }
@@ -250,7 +252,7 @@ func (s *Service) gigaProcessTasks(ctx context.Context, task models.Meeting) (er
 	}
 
 	s.Results <- task
-	fmt.Println("Отправили задачу в канал результатов:", task)
+	s.log.Info("Отправили задачу в канал результатов:", "Задача:", task)
 	return nil
 }
 
@@ -260,20 +262,20 @@ func (s *Service) uploadTasksToChannel(ctx context.Context) error {
 
 	for meeting, err := range s.storage.GetAllNewTasks(chCtx) {
 		if err != nil && !errors.Is(err, myerrors.ErrNoRows) {
-			fmt.Println("Ошибка при получении новых задач: ", err)
+			s.log.Info("Ошибка при получении новых задач.", "Текст ошибки:", err)
 			return err
 		}
-		fmt.Println("Получили задачу из БД в статусе NEW. Задача: ", meeting)
+		s.log.Info("Получили задачу из БД в статусе NEW.", "Задача:", meeting)
 
 		select {
 		case s.Tasks <- meeting:
-			fmt.Println("Отправили задачу в канал:", meeting)
+			s.log.Info("Отправили задачу в канал:", "Задача:", meeting)
 		case <-time.After(s.config.WaitPlaceInChan):
 			select {
 			case s.Tasks <- meeting:
-				fmt.Println("Отправили задачу в канал:", meeting)
+				s.log.Info("Отправили задачу в канал:", "Задача:", meeting)
 			case <-time.After(s.config.StopProcess):
-				fmt.Printf("Tasks channel full, skipping task %d\n", meeting.ID)
+				s.log.Info("Канал полон.", "Пропускаем задачу с ID:", meeting.ID)
 			}
 		}
 	}

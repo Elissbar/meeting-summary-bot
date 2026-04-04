@@ -3,6 +3,7 @@ package gigachat
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/Elissbar/meeting-summary-bot/internal/models"
@@ -17,14 +18,16 @@ type GigaChatClient struct {
 	client      *resty.Client
 	accessToken string
 	expiresAt   int64
+	log         *slog.Logger
 }
 
-func NewGigaChatClient(authURL, authToken, scope string) *GigaChatClient {
+func NewGigaChatClient(authURL, authToken, scope string, log *slog.Logger) *GigaChatClient {
 	giga := &GigaChatClient{
 		AuthURL:   authURL,
 		AuthToken: authToken,
 		Scope:     scope,
 		client:    resty.New(),
+		log:       log,
 	}
 	giga.Authorization()
 	return giga
@@ -78,6 +81,9 @@ func (c *GigaChatClient) UpdateToken() error {
 }
 
 func (c *GigaChatClient) Send(data string, chat bool) (string, error) {
+	if err := c.UpdateToken(); err != nil {
+		return "", err
+	}
 	prompt := processTranscriptionPrompt
 	if chat { // Команда /chat
 		prompt = userQuestion
@@ -96,6 +102,6 @@ func (c *GigaChatClient) Send(data string, chat bool) (string, error) {
 	if err := json.Unmarshal(resp.Body(), &res); err != nil {
 		return "", fmt.Errorf("error unmarshall salute upload response: %w", err)
 	}
-	fmt.Println("Giga reponse: ", resp.String())
+	c.log.Info("Giga send request.", "Reponse:", resp.String())
 	return res.Choices[0].Message.Content, nil
 }

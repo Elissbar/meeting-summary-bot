@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -13,10 +14,11 @@ import (
 type Handler struct {
 	Service *service.Service
 	Bot     *tg.Bot
+	log     *slog.Logger
 }
 
-func NewHandler(srvc *service.Service, tgBot *tg.Bot) (*Handler, error) {
-	return &Handler{srvc, tgBot}, nil
+func NewHandler(srvc *service.Service, tgBot *tg.Bot, log *slog.Logger) (*Handler, error) {
+	return &Handler{srvc, tgBot, log}, nil
 }
 
 func (h *Handler) Handle(ctx context.Context) {
@@ -47,7 +49,7 @@ func (h *Handler) ListMeetings(c tg.Context) error {
 	ctx := c.Get("ctx").(context.Context)
 
 	userID := c.Sender().ID
-	fmt.Printf("UserID: %d.\n", userID)
+	h.log.Info("", "UserID:", userID)
 
 	meetings, err := h.Service.GetAllMeetings(ctx, userID)
 	if err != nil {
@@ -61,7 +63,7 @@ func (h *Handler) GetMeeting(c tg.Context) error {
 	ctx := c.Get("ctx").(context.Context)
 
 	userID := c.Sender().ID
-	fmt.Printf("UserID: %d.\n", userID)
+	h.log.Info("", "UserID:", userID)
 
 	args := c.Args()
 
@@ -84,7 +86,7 @@ func (h *Handler) FindTranscription(c tg.Context) error {
 	ctx := c.Get("ctx").(context.Context)
 
 	userID := c.Sender().ID
-	fmt.Printf("UserID: %d.\n", userID)
+	h.log.Info("", "UserID:", userID)
 
 	args := c.Args()
 
@@ -105,21 +107,19 @@ func (h *Handler) FindTranscription(c tg.Context) error {
 
 func (b *Handler) ProcessMeeting(c tg.Context) error {
 	ctx := c.Get("ctx").(context.Context)
+	userID := c.Sender().ID
 
 	var fileID string
 	if c.Message().Audio == nil && c.Message().Voice != nil {
-		fmt.Println("Пришло голосовое")
+		b.log.Info("Голосовое от пользователя", "UserID:", userID)
 		fileID = c.Message().Voice.FileID
 	} else if c.Message().Audio != nil && c.Message().Voice == nil {
-		fmt.Println("Пришло аудио")
+		b.log.Info("Аудио от пользователя", "UserID:", userID)
 		fileID = c.Message().Audio.FileID
 	} else {
 		c.Send(fmt.Sprintf("Unexpected message type. Voice: %v. Audio: %v", c.Message().Voice, c.Message().Audio))
 		return fmt.Errorf("unexpected message type.")
 	}
-
-	userID := c.Sender().ID
-	fmt.Printf("FileID: %s. UserID: %d.\n", fileID, userID)
 
 	taskID, err := b.Service.CreateTask(ctx, fileID, userID)
 	if err != nil {
@@ -129,14 +129,13 @@ func (b *Handler) ProcessMeeting(c tg.Context) error {
 	return c.Send(fmt.Sprintf("File in process. ID: %d", taskID))
 }
 
-
 func (b *Handler) SendRequest(c tg.Context) error {
 	prompt := c.Message().Payload
-	
+
 	response, err := b.Service.RequestToChat(prompt)
 	if err != nil {
 		return c.Send(err.Error())
 	}
-	
+
 	return c.Send(response)
 }
